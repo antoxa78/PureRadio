@@ -20,13 +20,14 @@ enum class NavigationItem {
 }
 
 enum class BitrateFilter {
-    Low, Med, High
+    Low, High, FLAC
 }
 
 data class GenreGroup(
     val genreName: String,
     val stations: List<Station>,
-    val totalStations: Int = 0
+    val totalStations: Int = 0,
+    val filteredCount: Int = 0
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -41,6 +42,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _genreGroups = MutableStateFlow<List<GenreGroup>>(emptyList())
     val genreGroups: StateFlow<List<GenreGroup>> = _genreGroups
 
+    private val _countryGroups = MutableStateFlow<List<GenreGroup>>(emptyList())
+    val countryGroups: StateFlow<List<GenreGroup>> = _countryGroups
+
     private val _selectedBitrates = MutableStateFlow<Set<BitrateFilter>>(loadBitrateFilters())
     val selectedBitrates: StateFlow<Set<BitrateFilter>> = _selectedBitrates
 
@@ -49,6 +53,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
+
+    private val _playbackTime = MutableStateFlow(0L)
+    val playbackTime: StateFlow<Long> = _playbackTime
+
+    private val _playbackDuration = MutableStateFlow(0L)
+    val playbackDuration: StateFlow<Long> = _playbackDuration
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -97,11 +107,90 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastDbUpdate = MutableStateFlow<Long>(prefs.getLong("last_db_update", 0))
     val lastDbUpdate: StateFlow<Long> = _lastDbUpdate
 
+    private val _autoUpdateInterval = MutableStateFlow(prefs.getInt("auto_update_interval", 0))
+    val autoUpdateInterval: StateFlow<Int> = _autoUpdateInterval
+
+    private val _screensaverEnabled = MutableStateFlow(prefs.getBoolean("screensaver_enabled", true))
+    val screensaverEnabled: StateFlow<Boolean> = _screensaverEnabled
+
+    private val _screensaverTimeout = MutableStateFlow(prefs.getInt("screensaver_timeout", 5))
+    val screensaverTimeout: StateFlow<Int> = _screensaverTimeout
+
+    private val _isScreensaverShowing = MutableStateFlow(false)
+    val isScreensaverShowing: StateFlow<Boolean> = _isScreensaverShowing
+
+    private var lastInteractionTime = System.currentTimeMillis()
+
     init {
         player = ExoPlayer.Builder(application).build()
         loadTags()
         loadStats()
         selectNavigationItem(NavigationItem.Home)
+        startPlaybackTimer()
+        startScreensaverTimer()
+        checkAutoUpdate()
+    }
+
+    private fun startScreensaverTimer() {
+        viewModelScope.launch {
+            while (true) {
+                if (_screensaverEnabled.value && _isPlaying.value && !_isScreensaverShowing.value) {
+                    val idleTime = System.currentTimeMillis() - lastInteractionTime
+                    if (idleTime > _screensaverTimeout.value * 60 * 1000L) {
+                        _isScreensaverShowing.value = true
+                    }
+                }
+                kotlinx.coroutines.delay(5000)
+            }
+        }
+    }
+
+    fun resetScreensaverTimer() {
+        lastInteractionTime = System.currentTimeMillis()
+        if (_isScreensaverShowing.value) {
+            _isScreensaverShowing.value = false
+        }
+    }
+
+    private fun checkAutoUpdate() {
+        val intervalHours = _autoUpdateInterval.value
+        if (intervalHours > 0) {
+            val lastUpdate = _lastDbUpdate.value
+            val now = System.currentTimeMillis()
+            val intervalMillis = intervalHours * 60 * 60 * 1000L
+            if (now - lastUpdate > intervalMillis) {
+                updateDatabase()
+            }
+        }
+    }
+
+    fun setAutoUpdateInterval(hours: Int) {
+        _autoUpdateInterval.value = hours
+        prefs.edit().putInt("auto_update_interval", hours).apply()
+        if (hours > 0) checkAutoUpdate()
+    }
+
+    fun toggleScreensaver(enabled: Boolean) {
+        _screensaverEnabled.value = enabled
+        prefs.edit().putBoolean("screensaver_enabled", enabled).apply()
+    }
+
+    fun setScreensaverTimeout(minutes: Int) {
+        _screensaverTimeout.value = minutes
+        prefs.edit().putInt("screensaver_timeout", minutes).apply()
+    }
+
+    private fun startPlaybackTimer() {
+        viewModelScope.launch {
+            while (true) {
+                if (_isPlaying.value) {
+                    _playbackTime.value = player?.currentPosition ?: 0L
+                    val duration = player?.duration ?: 0L
+                    _playbackDuration.value = if (duration > 0) duration else 0L
+                }
+                kotlinx.coroutines.delay(1000)
+            }
+        }
     }
 
     private fun loadStats() {
@@ -289,21 +378,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _selectedBitrates.value = current
         saveBitrateFilters(current)
-        applyFilters()
+        
+        if (_selectedTag.value != null) {
+            selectTag(_selectedTag.value)
+        } else if (_selectedCountry.value != null) {
+            selectCountry(_selectedCountry.value)
+        } else if (_selectedNavItem.value == NavigationItem.Home) {
+            loadTopStations()
+        } else {
+            applyFilters()
+        }
     }
 
     private fun applyFilters() {
         val bitrates = _selectedBitrates.value
-        if (bitrates.isEmpty()) {
-            _stations.value = _allStations.value
-        } else {
-            _stations.value = _allStations.value.filter { station ->
-                val br = station.bitrate
-                (bitrates.contains(BitrateFilter.Low) && br < 160) ||
-                        (bitrates.contains(BitrateFilter.Med) && br >= 160 && br <= 320) ||
-                        (bitrates.contains(BitrateFilter.High) && br > 320)
-            }
+        _stations.value = _allStations.value.filter { matchesBitrateFilter(it, bitrates) }
+        
+        val filterGroup = { group: GenreGroup ->
+            group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
         }
+        
+        _genreGroups.value = _genreGroups.value.map(filterGroup)
+        _countryGroups.value = _countryGroups.value.map(filterGroup)
+    }
+
+    private fun matchesBitrateFilter(station: Station, bitrates: Set<BitrateFilter>): Boolean {
+        if (bitrates.isEmpty()) return true
+        val br = station.bitrate
+        val isFlac = station.codec.equals("FLAC", ignoreCase = true) || 
+                     station.tags.contains("flac", ignoreCase = true) ||
+                     station.name.contains("flac", ignoreCase = true) ||
+                     br >= 900
+        
+        return (bitrates.contains(BitrateFilter.Low) && br < 192 && !isFlac) ||
+                (bitrates.contains(BitrateFilter.High) && br >= 192 && !isFlac) ||
+                (bitrates.contains(BitrateFilter.FLAC) && isFlac)
     }
 
     private fun loadTopStations() {
@@ -312,17 +421,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val selected = _visibleGenres.value
                 val hideBroken = _hideBrokenStations.value
+                val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
+                
                 if (selected.isEmpty()) {
                     _genreGroups.value = emptyList()
-                    updateStations(repository.getTopStations(hideBroken = hideBroken))
+                    val topStations = repository.getTopStations(hideBroken = hideBroken)
+                    if (isFlacFilter) {
+                        val flacStations = repository.searchStations(tag = "flac", limit = 100, hideBroken = hideBroken)
+                        updateStations((topStations + flacStations).distinctBy { it.stationUuid })
+                    } else {
+                        updateStations(topStations)
+                    }
                 } else {
-                    val groups = mutableListOf<GenreGroup>()
+                    val bitrates = _selectedBitrates.value
                     selected.forEach { genre ->
                         val genreStations = repository.searchStations(tag = genre, limit = 250, hideBroken = hideBroken)
                         val total = _tags.value.find { it.name == genre }?.stationcount ?: genreStations.size
-                        groups.add(GenreGroup(genre, genreStations, total))
+                        val filteredCount = genreStations.count { matchesBitrateFilter(it, bitrates) }
+                        val newGroup = GenreGroup(genre, genreStations, total, filteredCount)
+                        _genreGroups.value = (_genreGroups.value + newGroup).distinctBy { it.genreName }
                     }
-                    _genreGroups.value = groups
                 }
             } catch (e: Exception) {
                 _error.value = "Failed to load stations"
@@ -334,24 +452,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadTags() {
         viewModelScope.launch {
-            if (_tags.value.isNotEmpty()) return@launch
             try {
-                _tags.value = repository.getTags()
+                if (_tags.value.isEmpty()) {
+                    _tags.value = repository.getTags()
+                }
+                loadGroupsForTags(_tags.value)
             } catch (e: Exception) {
                 _error.value = "Failed to load genres"
             }
         }
     }
 
+    private fun loadGroupsForTags(tags: List<Tag>) {
+        viewModelScope.launch {
+            val bitrates = _selectedBitrates.value
+            val hideBroken = _hideBrokenStations.value
+            // Only load groups that aren't already loaded to save bandwidth
+            val existingNames = _genreGroups.value.map { it.genreName }.toSet()
+            tags.forEach { tag ->
+                if (!existingNames.contains(tag.name)) {
+                    val stations = repository.searchStations(tag = tag.name, limit = 100, hideBroken = hideBroken)
+                    val filteredCount = stations.count { matchesBitrateFilter(it, bitrates) }
+                    val newGroup = GenreGroup(tag.name, stations, tag.stationcount, filteredCount)
+                    _genreGroups.value = (_genreGroups.value + newGroup).distinctBy { it.genreName }
+                }
+            }
+        }
+    }
+
     private fun loadCountries() {
         viewModelScope.launch {
+            if (_countries.value.isNotEmpty()) {
+                loadGroupsForCountries(_countries.value)
+                return@launch
+            }
             _isLoading.value = true
             try {
-                _countries.value = repository.getCountries()
+                val countries = repository.getCountries()
+                _countries.value = countries
+                loadGroupsForCountries(countries)
             } catch (e: Exception) {
                 _error.value = "Failed to load countries"
             } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    private fun loadGroupsForCountries(countries: List<Country>) {
+        viewModelScope.launch {
+            val bitrates = _selectedBitrates.value
+            val hideBroken = _hideBrokenStations.value
+            countries.forEach { country ->
+                if (_countryGroups.value.any { it.genreName == country.name }) return@forEach
+                val stations = repository.searchStations(country = country.name, limit = 100, hideBroken = hideBroken)
+                val filteredCount = stations.count { matchesBitrateFilter(it, bitrates) }
+                val newGroup = GenreGroup(country.name, stations, country.stationcount, filteredCount)
+                _countryGroups.value = (_countryGroups.value + newGroup).distinctBy { it.genreName }
             }
         }
     }
@@ -390,7 +547,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                updateStations(repository.searchStations(tag = tag.name, hideBroken = _hideBrokenStations.value))
+                val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
+                val stations = repository.searchStations(tag = tag.name, limit = 250, hideBroken = _hideBrokenStations.value)
+                if (isFlacFilter) {
+                    val flacStations = repository.searchStations(tag = "flac", query = tag.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                    updateStations((stations + flacStations).distinctBy { it.stationUuid })
+                } else {
+                    updateStations(stations)
+                }
             } catch (e: Exception) {
                 _error.value = "Failed to load stations for genre"
             } finally {
@@ -407,7 +571,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                updateStations(repository.searchStations(country = country.name, hideBroken = _hideBrokenStations.value))
+                val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
+                val stations = repository.searchStations(country = country.name, limit = 250, hideBroken = _hideBrokenStations.value)
+                if (isFlacFilter) {
+                    val flacStations = repository.searchStations(tag = "flac", country = country.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                    updateStations((stations + flacStations).distinctBy { it.stationUuid })
+                } else {
+                    updateStations(stations)
+                }
             } catch (e: Exception) {
                 _error.value = "Failed to load stations for country"
             } finally {

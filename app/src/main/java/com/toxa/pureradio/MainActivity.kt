@@ -6,7 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,23 +26,33 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.TheaterComedy
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -55,6 +66,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +100,7 @@ import com.toxa.pureradio.ui.viewmodel.BitrateFilter
 import com.toxa.pureradio.ui.viewmodel.GenreGroup
 import com.toxa.pureradio.ui.viewmodel.MainViewModel
 import com.toxa.pureradio.ui.viewmodel.NavigationItem
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -100,7 +114,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             PureRadioTheme {
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onKeyEvent {
+                            viewModel.resetScreensaverTimer()
+                            false
+                        },
                     shape = RectangleShape
                 ) {
                     MainScreen(viewModel)
@@ -113,11 +132,13 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val selectedNavItem by viewModel.selectedNavItem.collectAsState()
     val stations by viewModel.stations.collectAsState()
     val genreGroups by viewModel.genreGroups.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val countries by viewModel.countries.collectAsState()
+    val countryGroups by viewModel.countryGroups.collectAsState()
     val currentStation by viewModel.currentStation.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -127,204 +148,212 @@ fun MainScreen(viewModel: MainViewModel) {
     val selectedBitrates by viewModel.selectedBitrates.collectAsState()
     val settingsSubMenu by viewModel.settingsSubMenu.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
+    val playbackTime by viewModel.playbackTime.collectAsState()
+    val isScreensaverShowing by viewModel.isScreensaverShowing.collectAsState()
 
-    var stationToManageFav by remember { mutableStateOf<Station?>(null) }
+    var stationToFavorite by remember { mutableStateOf<Station?>(null) }
+    var isDialogReady by remember { mutableStateOf(false) }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerFocusRequesters = remember { NavigationItem.entries.associateWith { FocusRequester() } }
+    val dialogFocusRequester = remember { FocusRequester() }
+    val cancelFocusRequester = remember { FocusRequester() }
 
-    BackHandler(enabled = selectedTag != null || selectedCountry != null || settingsSubMenu != null) {
-        if (selectedTag != null) viewModel.selectTag(null)
-        if (selectedCountry != null) viewModel.selectCountry(null)
-        if (settingsSubMenu != null) viewModel.setSettingsSubMenu(null)
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Open) {
+            try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
+        }
     }
 
-    if (stationToManageFav != null) {
-        val isFav = favorites.contains(stationToManageFav!!.stationUuid)
-        Dialog(onDismissRequest = { stationToManageFav = null }) {
-            Surface(
-                modifier = Modifier.width(300.dp).padding(16.dp),
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(stationToManageFav!!.name, style = MaterialTheme.typography.headlineSmall)
-                    Button(
-                        onClick = {
-                            viewModel.toggleFavorite(stationToManageFav!!)
-                            stationToManageFav = null
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isFav) "Remove from Favourites" else "Add to Favourites")
-                    }
-                    Button(
-                        onClick = { stationToManageFav = null },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = androidx.tv.material3.ButtonDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            }
+    LaunchedEffect(stationToFavorite) {
+        if (stationToFavorite != null) {
+            isDialogReady = false
+            try { cancelFocusRequester.requestFocus() } catch (_: Exception) {}
+            // Wait for the user to release the remote button after long press
+            delay(800)
+            isDialogReady = true
+        }
+    }
+
+    BackHandler(enabled = true) {
+        if (stationToFavorite != null) {
+            stationToFavorite = null
+        } else if (selectedTag != null) {
+            viewModel.selectTag(null)
+        } else if (selectedCountry != null) {
+            viewModel.selectCountry(null)
+        } else if (settingsSubMenu != null) {
+            viewModel.setSettingsSubMenu(null)
+        } else if (drawerState.currentValue == DrawerValue.Closed) {
+            drawerState.setValue(DrawerValue.Open)
+            try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
+        } else {
+            (context as? android.app.Activity)?.finish()
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f)) {
-            NavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = { drawerValue ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .padding(vertical = 16.dp, horizontal = 4.dp)
-                            .width(if (drawerValue == DrawerValue.Open) 200.dp else 48.dp)
-                    ) {
-                        NavigationItem.entries.forEach { item ->
-                            NavigationDrawerItem(
-                                selected = selectedNavItem == item,
-                                onClick = { 
-                                    viewModel.selectNavigationItem(item)
-                                    drawerState.setValue(DrawerValue.Closed)
-                                },
-                                leadingContent = {
-                                    val icon = when (item) {
-                                        NavigationItem.Home -> Icons.Default.Home
-                                        NavigationItem.Recent -> Icons.Default.History
-                                        NavigationItem.Search -> Icons.Default.Search
-                                        NavigationItem.Genres -> Icons.AutoMirrored.Filled.List
-                                        NavigationItem.Countries -> Icons.Default.Place
-                                        NavigationItem.Favourites -> Icons.Default.Favorite
-                                        NavigationItem.Settings -> Icons.Default.Settings
-                                        NavigationItem.Exit -> Icons.AutoMirrored.Filled.ExitToApp
-                                    }
-                                    Icon(
-                                        icon, 
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            ) {
-                                if (drawerValue == DrawerValue.Open) {
-                                    Text(
-                                        item.name, 
-                                        maxLines = 1, 
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
-                                }
+        NavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(vertical = 16.dp, horizontal = 4.dp)
+                        .onFocusChanged { 
+                            if (it.hasFocus) {
+                                drawerState.setValue(DrawerValue.Open)
+                            } else {
+                                drawerState.setValue(DrawerValue.Closed)
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
                         }
-                    }
-                }
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    val title = when {
-                        selectedTag != null -> selectedTag!!.name
-                        selectedCountry != null -> selectedCountry!!.name
-                        else -> selectedNavItem.name
-                    }
-                    val isDeepDive = selectedTag != null || selectedCountry != null
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 32.dp, top = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isDeepDive) {
-                            Surface(
-                                colors = androidx.tv.material3.SurfaceDefaults.colors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                shape = MaterialTheme.shapes.extraSmall,
-                                modifier = Modifier.padding(end = 12.dp)
-                            ) {
-                                Text(
-                                    text = if (selectedTag != null) "GENRE" else "COUNTRY",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    fontWeight = FontWeight.Bold
+                ) {
+                    NavigationItem.entries.forEach { item ->
+                        NavigationDrawerItem(
+                            selected = selectedNavItem == item,
+                            onClick = { 
+                                viewModel.selectNavigationItem(item)
+                                drawerState.setValue(DrawerValue.Closed)
+                            },
+                            modifier = Modifier.focusRequester(drawerFocusRequesters[item]!!),
+                            leadingContent = {
+                                val icon = when (item) {
+                                    NavigationItem.Home -> Icons.Default.Home
+                                    NavigationItem.Recent -> Icons.Default.History
+                                    NavigationItem.Search -> Icons.Default.Search
+                                    NavigationItem.Genres -> Icons.AutoMirrored.Filled.List
+                                    NavigationItem.Countries -> Icons.Default.Place
+                                    NavigationItem.Favourites -> Icons.Default.Favorite
+                                    NavigationItem.Settings -> Icons.Default.Settings
+                                    NavigationItem.Exit -> Icons.AutoMirrored.Filled.ExitToApp
+                                }
+                                Icon(
+                                    icon, 
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
-                        }
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = if (isDeepDive) FontWeight.ExtraBold else FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        if (selectedNavItem != NavigationItem.Settings) {
-                            BitrateFilters(
-                                selectedBitrates = selectedBitrates,
-                                onToggleFilter = { viewModel.toggleBitrateFilter(it) }
+                        ) {
+                            Text(
+                                item.name, 
+                                maxLines = 1, 
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelLarge
                             )
                         }
-
-                        if (selectedTag != null || selectedCountry != null) {
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Button(onClick = {
-                                viewModel.selectTag(null)
-                                viewModel.selectCountry(null)
-                            }) {
-                                Text("Back")
-                            }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                val title = when {
+                    selectedTag != null -> {
+                        val name = selectedTag!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+                        "$name (${stations.size} Stations)"
+                    }
+                    selectedCountry != null -> {
+                        val name = selectedCountry!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+                        "$name (${stations.size} Stations)"
+                    }
+                    else -> selectedNavItem.name
+                }
+                val isDeepDive = selectedTag != null || selectedCountry != null
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 32.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isDeepDive) {
+                        Surface(
+                            colors = SurfaceDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            shape = MaterialTheme.shapes.extraSmall,
+                            modifier = Modifier.padding(end = 12.dp)
+                        ) {
+                            Text(
+                                text = if (selectedTag != null) "GENRE" else "COUNTRY",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = if (isDeepDive) FontWeight.ExtraBold else FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        if (isLoading && selectedNavItem != NavigationItem.Search) {
-                            Text(text = "Loading...", style = MaterialTheme.typography.headlineMedium)
-                        } else if (error != null) {
-                            Text(text = error!!, style = MaterialTheme.typography.headlineMedium)
-                        } else {
-                            when (selectedNavItem) {
-                                NavigationItem.Home -> {
-                                    if (genreGroups.isNotEmpty()) {
-                                        if (selectedTag == null) {
-                                            GenreGroupGrid(genreGroups) { name ->
-                                                viewModel.selectTag(tags.find { it.name == name })
-                                            }
-                                        } else {
-                                            StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
+                    if (selectedNavItem != NavigationItem.Settings) {
+                        BitrateFilters(
+                            selectedBitrates = selectedBitrates,
+                            onToggleFilter = { viewModel.toggleBitrateFilter(it) }
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    if (error != null) {
+                        Text(text = error!!, style = MaterialTheme.typography.headlineMedium)
+                    } else {
+                        when (selectedNavItem) {
+                            NavigationItem.Home -> {
+                                val visibleGenres by viewModel.visibleGenres.collectAsState()
+                                val homeGroups = if (visibleGenres.isEmpty()) genreGroups else genreGroups.filter { visibleGenres.contains(it.genreName) }
+                                
+                                if (homeGroups.isNotEmpty()) {
+                                    if (selectedTag == null) {
+                                        GenreGroupGrid(homeGroups) { name ->
+                                            viewModel.selectTag(tags.find { it.name == name })
                                         }
                                     } else {
-                                        StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
+                                        StationGrid(stations, viewModel) { stationToFavorite = it }
                                     }
+                                } else {
+                                    StationGrid(stations, viewModel) { stationToFavorite = it }
                                 }
-                                NavigationItem.Recent -> {
-                                    StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
-                                }
-                                NavigationItem.Favourites -> {
-                                    StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
-                                }
-                                NavigationItem.Search -> {
-                                    SearchScreen(viewModel, onLongClick = { stationToManageFav = it })
-                                }
-                                NavigationItem.Genres -> {
-                                    if (selectedTag == null) {
-                                        TagGrid(tags) { viewModel.selectTag(it) }
-                                    } else {
-                                        StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
-                                    }
-                                }
-                                NavigationItem.Countries -> {
-                                    if (selectedCountry == null) {
-                                        CountryGrid(countries) { viewModel.selectCountry(it) }
-                                    } else {
-                                        StationGrid(stations, viewModel, onLongClick = { stationToManageFav = it })
-                                    }
-                                }
-                                NavigationItem.Settings -> {
-                                    SettingsScreen(viewModel)
-                                }
-                                NavigationItem.Exit -> {}
                             }
+                            NavigationItem.Recent -> {
+                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                            }
+                            NavigationItem.Favourites -> {
+                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                            }
+                            NavigationItem.Search -> {
+                                SearchScreen(viewModel, onLongClick = { stationToFavorite = it })
+                            }
+                            NavigationItem.Genres -> {
+                                if (selectedTag == null) {
+                                    TagGrid(tags, viewModel) { viewModel.selectTag(it) }
+                                } else {
+                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                }
+                            }
+                            NavigationItem.Countries -> {
+                                if (selectedCountry == null) {
+                                    CountryGrid(countries, countryGroups) { viewModel.selectCountry(it) }
+                                } else {
+                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                }
+                            }
+                            NavigationItem.Settings -> {
+                                SettingsScreen(viewModel)
+                            }
+                            NavigationItem.Exit -> {}
+                        }
+                    }
+                    
+                    if (isLoading && selectedNavItem != NavigationItem.Search) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "Loading...", style = MaterialTheme.typography.headlineMedium)
                         }
                     }
                 }
@@ -332,16 +361,76 @@ fun MainScreen(viewModel: MainViewModel) {
         }
 
         currentStation?.let { station ->
-            val favorites by viewModel.favorites.collectAsState()
+            val playbackDuration by viewModel.playbackDuration.collectAsState()
             NowPlayingBar(
                 station = station,
                 isPlaying = isPlaying,
                 isFavorite = favorites.contains(station.stationUuid),
+                playbackTime = playbackTime,
+                playbackDuration = playbackDuration,
                 onTogglePlay = { viewModel.togglePlayPause() },
                 onToggleFavorite = { viewModel.toggleFavorite(station) },
                 onNext = { viewModel.playNext() },
                 onPrevious = { viewModel.playPrevious() }
             )
+        }
+    }
+
+    if (isScreensaverShowing) {
+        Screensaver(viewModel)
+    }
+
+    stationToFavorite?.let { station ->
+        val isAlreadyFavorite = favorites.contains(station.stationUuid)
+        Dialog(onDismissRequest = { stationToFavorite = null }) {
+            Surface(
+                modifier = Modifier.padding(16.dp),
+                shape = MaterialTheme.shapes.medium,
+                colors = SurfaceDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (isAlreadyFavorite) "Remove station from favourites?" else "Add station to favourites?",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = station.name,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(
+                            onClick = { if (isDialogReady) stationToFavorite = null },
+                            modifier = Modifier.focusRequester(cancelFocusRequester)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Button(
+                            onClick = {
+                                if (isDialogReady) {
+                                    viewModel.toggleFavorite(station)
+                                    stationToFavorite = null
+                                }
+                            },
+                            modifier = Modifier.focusRequester(dialogFocusRequester)
+                        ) {
+                            Text(if (isAlreadyFavorite) "Remove" else "Add")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -353,12 +442,12 @@ fun BitrateFilters(
     onToggleFilter: (BitrateFilter) -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Bitrate: ", style = MaterialTheme.typography.labelLarge)
+        Text("Filter Stations By Bitrate: ", style = MaterialTheme.typography.labelLarge)
         BitrateFilter.entries.forEach { filter ->
             val label = when (filter) {
-                BitrateFilter.Low -> "Low (<160)"
-                BitrateFilter.Med -> "Med (160-320)"
-                BitrateFilter.High -> "High (>320)"
+                BitrateFilter.Low -> "Low (<192)"
+                BitrateFilter.High -> "High (>=192)"
+                BitrateFilter.FLAC -> "FLAC"
             }
             val isSelected = selectedBitrates.contains(filter)
             Button(
@@ -389,81 +478,226 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val hideBroken by viewModel.hideBrokenStations.collectAsState()
     val serverStats by viewModel.serverStats.collectAsState()
     val lastUpdate by viewModel.lastDbUpdate.collectAsState()
+    val autoUpdateInterval by viewModel.autoUpdateInterval.collectAsState()
+    val screensaverEnabled by viewModel.screensaverEnabled.collectAsState()
+    val screensaverTimeout by viewModel.screensaverTimeout.collectAsState()
 
-    if (settingsSubMenu == "HomeGenres") {
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { viewModel.setSettingsSubMenu(null) }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    val subMenuFocusRequester = remember { FocusRequester() }
+    val mainMenuFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(settingsSubMenu) {
+        if (settingsSubMenu != null) {
+            try { subMenuFocusRequester.requestFocus() } catch (_: Exception) {}
+        } else {
+            try { mainMenuFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
+    when (settingsSubMenu) {
+        "HomeGenres" -> {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Home Genres Menu", style = MaterialTheme.typography.headlineLarge)
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text("Home Genres Menu", style = MaterialTheme.typography.headlineLarge)
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            items(tags) { tag ->
-                ListItem(
-                    selected = false,
-                    onClick = { viewModel.toggleGenreVisibility(tag.name) },
-                    headlineContent = { Text(tag.name) },
-                    trailingContent = {
-                        Checkbox(checked = visibleGenres.contains(tag.name), onCheckedChange = null)
-                    }
-                )
+                items(tags) { tag ->
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.toggleGenreVisibility(tag.name) },
+                        headlineContent = { 
+                            Text(tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }) 
+                        },
+                        trailingContent = {
+                            Checkbox(checked = visibleGenres.contains(tag.name), onCheckedChange = null)
+                        }
+                    )
+                }
             }
         }
-    } else {
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
-            item {
-                Text("Settings", style = MaterialTheme.typography.headlineLarge)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            item {
-                ListItem(
-                    selected = false,
-                    onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
-                    headlineContent = { Text("Home Genres Menu") },
-                    supportingContent = { Text("Select genres to display on the Home tab.") },
-                    trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
-                )
-            }
-
-            item {
-                ListItem(
-                    selected = false,
-                    onClick = { viewModel.toggleHideBroken() },
-                    headlineContent = { Text("Hide broken stations") },
-                    supportingContent = { Text("Filter out stations that are currently not working.") },
-                    trailingContent = {
-                        Switch(checked = hideBroken, onCheckedChange = null)
+        "AutoUpdate" -> {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Auto Update Database", style = MaterialTheme.typography.headlineLarge)
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                val options = listOf(
+                    0 to "Off",
+                    12 to "Every 12 Hours",
+                    24 to "Every 24 Hours"
                 )
+                items(options) { (hours, label) ->
+                    ListItem(
+                        selected = autoUpdateInterval == hours,
+                        onClick = { 
+                            viewModel.setAutoUpdateInterval(hours)
+                            viewModel.setSettingsSubMenu(null)
+                        },
+                        headlineContent = { Text(label) },
+                        trailingContent = {
+                            if (autoUpdateInterval == hours) {
+                                Icon(Icons.Default.History, contentDescription = null)
+                            }
+                        }
+                    )
+                }
             }
-
-            item {
-                ListItem(
-                    selected = false,
-                    onClick = { viewModel.updateDatabase() },
-                    headlineContent = { Text("Update stations database") },
-                    supportingContent = {
-                        val dateStr = if (lastUpdate > 0) {
-                            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lastUpdate))
-                        } else "Never"
-                        Text("Last update: $dateStr. Total stations: ${serverStats?.stations ?: "..."}")
-                    },
-                    trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
-                )
+        }
+        "Screensaver" -> {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Screensaver Settings", style = MaterialTheme.typography.headlineLarge)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.toggleScreensaver(!screensaverEnabled) },
+                        headlineContent = { Text("Enable Screensaver") },
+                        supportingContent = { Text("Show screensaver when playback is active") },
+                        trailingContent = {
+                            Switch(checked = screensaverEnabled, onCheckedChange = null)
+                        }
+                    )
+                }
+                val timeouts = listOf(1, 5, 10, 20, 30)
+                items(timeouts) { minutes ->
+                    ListItem(
+                        selected = screensaverTimeout == minutes,
+                        onClick = {
+                            viewModel.setScreensaverTimeout(minutes)
+                            viewModel.setSettingsSubMenu(null)
+                        },
+                        headlineContent = { Text("Timeout: $minutes minutes") },
+                        trailingContent = {
+                            if (screensaverTimeout == minutes) {
+                                Icon(Icons.Default.History, contentDescription = null)
+                            }
+                        }
+                    )
+                }
             }
+        }
+        else -> {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+                item {
+                    Text("Settings", style = MaterialTheme.typography.headlineLarge)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("About", style = MaterialTheme.typography.titleLarge)
-                        val buildTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                        Text("Build Date: $buildTime", style = MaterialTheme.typography.bodyMedium)
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
+                        modifier = Modifier.focusRequester(mainMenuFocusRequester),
+                        headlineContent = { Text("Home Genres Menu") },
+                        supportingContent = { Text("Select genres to display on the Home tab.") },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
+                        headlineContent = { Text("Auto Update Database") },
+                        supportingContent = { 
+                            val label = when(autoUpdateInterval) {
+                                12 -> "Every 12 Hours"
+                                24 -> "Every 24 Hours"
+                                else -> "Off"
+                            }
+                            Text("Current interval: $label") 
+                        },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("Screensaver") },
+                        headlineContent = { Text("Screensaver") },
+                        supportingContent = {
+                            val label = if (screensaverEnabled) "On (${screensaverTimeout}m)" else "Off"
+                            Text("Current status: $label")
+                        },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.toggleHideBroken() },
+                        headlineContent = { Text("Hide broken stations") },
+                        supportingContent = { Text("Filter out stations that are currently not working.") },
+                        trailingContent = {
+                            Switch(checked = hideBroken, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.updateDatabase() },
+                        headlineContent = { Text("Update stations database") },
+                        supportingContent = {
+                            val dateStr = if (lastUpdate > 0) {
+                                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lastUpdate))
+                            } else "Never"
+                            Text("Last update: $dateStr. Total stations: ${serverStats?.stations ?: "..."}")
+                        },
+                        trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Surface(
+                            colors = SurfaceDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Pure Radio TV", style = MaterialTheme.typography.titleMedium)
+                                val buildDate = "2025-01-24"
+                                val buildTime = "19:45"
+                                Text("Build: $buildDate $buildTime", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            }
+                        }
                     }
                 }
             }
@@ -472,7 +706,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit) {
+fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val stations by viewModel.stations.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -512,88 +746,247 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit) {
             Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
         } else {
             Box(modifier = Modifier.weight(1f)) {
-                StationGrid(stations, viewModel, onLongClick = onLongClick)
+                StationGrid(stations, viewModel, autoFocus = false, onLongClick = onLongClick)
             }
         }
     }
 }
 
 @Composable
-fun GenreGroupGrid(groups: List<GenreGroup>, onGroupClick: (String) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(groups) { group ->
-            GenreGroupCard(group, onClick = { onGroupClick(group.genreName) })
+fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(groups) {
+        if (autoFocus) {
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
+        }
+    }
+    if (groups.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
+    } else {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(5),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            itemsIndexed(groups) { index, group ->
+                GenreGroupCard(
+                    group = group.copy(genreName = group.genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }),
+                    onClick = { onGroupClick(group.genreName) },
+                    modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
+                )
+            }
         }
     }
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit) {
+fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         onClick = onClick,
-        modifier = Modifier.padding(8.dp).height(200.dp)
+        modifier = modifier
+            .padding(8.dp)
+            .height(180.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            val firstStation = group.stations.firstOrNull()
+        Box(modifier = Modifier.fillMaxSize().background(getGenreColor(group.genreName))) {
             AsyncImage(
-                model = if (firstStation?.favicon?.isNotEmpty() == true) firstStation.favicon else R.drawable.ic_radio_logo,
+                model = getGenreImageUrl(group.genreName),
                 contentDescription = null,
-                modifier = Modifier.size(80.dp).padding(8.dp),
-                contentScale = ContentScale.Fit,
-                error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
-                placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.6f
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = group.genreName, style = MaterialTheme.typography.titleMedium)
-            Text(text = "${group.totalStations} stations", style = MaterialTheme.typography.bodySmall)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = group.genreName, 
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                val countText = if (group.filteredCount < group.stations.size) {
+                    "${group.filteredCount} filtered stations"
+                } else {
+                    "${group.totalStations} stations"
+                }
+                Text(
+                    text = countText, 
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            }
         }
     }
 }
 
+fun getGenreColor(genre: String): Color {
+    val hash = genre.hashCode()
+    val r = (Math.abs(hash) % 100) + 20
+    val g = (Math.abs(hash shr 8) % 100) + 20
+    val b = (Math.abs(hash shr 16) % 100) + 20
+    return Color(r, g, b)
+}
+
+fun getGenreImageUrl(genre: String): String {
+    val genreLower = genre.lowercase().trim()
+    return when {
+        genreLower.contains("heavy metal") -> "https://images.unsplash.com/photo-1541614101331-1a5a3a194e90?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("metal") -> "https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("punk") -> "https://images.unsplash.com/photo-1583790155708-360d8a5563c0?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("hard rock") -> "https://images.unsplash.com/photo-1521334885634-9552f1055677?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("classic rock") -> "https://images.unsplash.com/photo-1459749411177-042180ce673c?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("rock") -> "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("alternative") || genreLower.contains("indie") -> "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("synthpop") -> "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("pop") && (genreLower.contains("music") || genreLower.contains("hits")) -> "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("pop") || genreLower.contains("hits") || genreLower.contains("top") || genreLower.contains("chart") -> "https://images.unsplash.com/photo-1514525253361-bee8a187449a?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("smooth jazz") -> "https://images.unsplash.com/photo-1525994886773-080587e161c3?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("jazz") -> "https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("blues") -> "https://images.unsplash.com/photo-1553034545-31a386996173?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("soul") -> "https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("funk") || genreLower.contains("disco") -> "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("orchestra") || genreLower.contains("symphony") -> "https://images.unsplash.com/photo-1465847899035-1379e576ee5d?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("classical") || genreLower.contains("classic") -> "https://images.unsplash.com/photo-1507838596018-b943e1dd13a9?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("opera") -> "https://images.unsplash.com/photo-1520529125433-21950920427e?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("techno") -> "https://images.unsplash.com/photo-1571266028243-3716f02d2d2e?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("deep house") -> "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("house") -> "https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("trance") -> "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("psytrance") -> "https://images.unsplash.com/photo-1520092352425-9fae9f057c9a?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("electro") || genreLower.contains("edm") -> "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("ambient") -> "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("chillout") || genreLower.contains("chill") -> "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("lounge") -> "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("country") -> "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("bluegrass") -> "https://images.unsplash.com/photo-1525201548942-d8b8c09ec8d1?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("folk") -> "https://images.unsplash.com/photo-1468164016595-6108e4c60c8b?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("hip hop") -> "https://images.unsplash.com/photo-1520262454473-a1a82276a574?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("rap") || genreLower.contains("urban") || genreLower.contains("r&b") -> "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("reggae") -> "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("ska") -> "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("world") -> "https://images.unsplash.com/photo-1526218626217-dc65a29bb444?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("latin") -> "https://images.unsplash.com/photo-1525994886773-080587e161c3?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("80s") -> "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("90s") -> "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("70s") -> "https://images.unsplash.com/photo-1516062423079-7ca13cdc7f5a?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("60s") || genreLower.contains("oldies") || genreLower.contains("retro") -> "https://images.unsplash.com/photo-1484755560615-a4c64e99529b?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("soundtrack") || genreLower.contains("movie") || genreLower.contains("film") -> "https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("meditation") || genreLower.contains("spiritual") || genreLower.contains("religious") -> "https://images.unsplash.com/photo-1506126613408-eca07ce68773?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("news") || genreLower.contains("talk") || genreLower.contains("info") -> "https://images.unsplash.com/photo-1472289065668-ce650ac443d2?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("sport") -> "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("comedy") -> "https://images.unsplash.com/photo-1527224857830-43a7acc85260?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("christmas") || genreLower.contains("xmas") -> "https://images.unsplash.com/photo-1543589077-47d81606c1bf?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("kids") || genreLower.contains("children") -> "https://images.unsplash.com/photo-1516627145497-ae6968895b74?q=80&w=600&auto=format&fit=crop"
+        genreLower.contains("lofi") -> "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=600&auto=format&fit=crop"
+        else -> "https://images.unsplash.com/photo-1453090927415-5f45085b65c0?q=80&w=600&auto=format&fit=crop"
+    }
+}
+
 @Composable
-fun StationGrid(stations: List<Station>, viewModel: MainViewModel, onLongClick: (Station) -> Unit) {
+fun StationGrid(
+    stations: List<Station>, 
+    viewModel: MainViewModel, 
+    autoFocus: Boolean = true,
+    onLongClick: (Station) -> Unit = {}
+) {
     val favorites by viewModel.favorites.collectAsState()
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(stations) { station ->
-            StationCard(
-                station = station,
-                isFavorite = favorites.contains(station.stationUuid),
-                onClick = { viewModel.playStation(station) },
-                onLongClick = { onLongClick(station) }
-            )
+    val focusRequester = remember { FocusRequester() }
+    
+    LaunchedEffect(stations) {
+        if (autoFocus) {
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
+        }
+    }
+
+    if (stations.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
+    } else {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(5),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            itemsIndexed(stations) { index, station ->
+                StationCard(
+                    station = station,
+                    isFavorite = favorites.contains(station.stationUuid),
+                    onClick = { viewModel.playStation(station) },
+                    onLongClick = { onLongClick(station) },
+                    modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
+                )
+            }
         }
     }
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun TagGrid(tags: List<Tag>, onTagClick: (Tag) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(tags) { tag ->
-            Card(
-                onClick = { onTagClick(tag) },
-                modifier = Modifier.padding(8.dp).height(80.dp)
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = tag.name, style = MaterialTheme.typography.titleMedium)
-                        Text(text = "${tag.stationcount} stations", style = MaterialTheme.typography.bodySmall)
+fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit) {
+    val genreGroups by viewModel.genreGroups.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(tags) {
+        if (autoFocus) {
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
+        }
+    }
+    if (tags.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
+    } else {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(5),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            itemsIndexed(tags) { index, tag ->
+                Card(
+                    onClick = { onTagClick(tag) },
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .height(180.dp)
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize().background(getGenreColor(tag.name))) {
+                        AsyncImage(
+                            model = getGenreImageUrl(tag.name),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            alpha = 0.6f
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }, 
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val group = genreGroups.find { it.genreName == tag.name }
+                            val countText = if (group != null && group.filteredCount < group.stations.size) {
+                                "${group.filteredCount} filtered stations"
+                            } else {
+                                "${tag.stationcount} stations"
+                            }
+                            Text(
+                                text = countText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
                     }
                 }
             }
@@ -603,21 +996,70 @@ fun TagGrid(tags: List<Tag>, onTagClick: (Tag) -> Unit) {
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CountryGrid(countries: List<Country>, onCountryClick: (Country) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(countries) { country ->
-            Card(
-                onClick = { onCountryClick(country) },
-                modifier = Modifier.padding(8.dp).height(80.dp)
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = country.name, style = MaterialTheme.typography.titleMedium)
-                        Text(text = "${country.stationcount} stations", style = MaterialTheme.typography.bodySmall)
+fun CountryGrid(
+    countries: List<Country>, 
+    countryGroups: List<GenreGroup>, 
+    autoFocus: Boolean = true, 
+    onCountryClick: (Country) -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(countries) {
+        if (autoFocus) {
+            try { focusRequester.requestFocus() } catch (e: Exception) {}
+        }
+    }
+    if (countries.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
+    } else {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(5),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            itemsIndexed(countries) { index, country ->
+                Card(
+                    onClick = { onCountryClick(country) },
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .height(180.dp)
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize().background(getGenreColor(country.name))) {
+                        AsyncImage(
+                            model = "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop", // Travel/World image
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            alpha = 0.6f
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = country.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val group = countryGroups.find { it.genreName == country.name }
+                            val countText = if (group != null && group.filteredCount < group.stations.size) {
+                                "${group.filteredCount} filtered stations"
+                            } else {
+                                "${country.stationcount} stations"
+                            }
+                            Text(
+                                text = countText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
                     }
                 }
             }
@@ -632,17 +1074,14 @@ fun StationCard(
     isFavorite: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit = {}
 ) {
     Card(
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier
             .padding(8.dp)
-            .height(200.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
+            .height(160.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -681,10 +1120,67 @@ fun StationCard(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
+fun Screensaver(viewModel: MainViewModel) {
+    val currentStation by viewModel.currentStation.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
+    }
+    
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent {
+                viewModel.resetScreensaverTimer()
+                true
+            },
+        colors = SurfaceDefaults.colors(containerColor = Color.Black)
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                currentStation?.let { station ->
+                    AsyncImage(
+                        model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                        contentDescription = null,
+                        modifier = Modifier.size(200.dp),
+                        contentScale = ContentScale.Fit,
+                        error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
+                        placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = station.name,
+                        style = MaterialTheme.typography.displayMedium,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Playing...",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.height(48.dp))
+                Text(
+                    text = "Press any key to return",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.Gray
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
 fun NowPlayingBar(
     station: Station,
     isPlaying: Boolean,
     isFavorite: Boolean,
+    playbackTime: Long,
+    playbackDuration: Long,
     onTogglePlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onNext: () -> Unit,
@@ -744,7 +1240,26 @@ fun NowPlayingBar(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = station.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = station.country, style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = station.country, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    val timeMinutes = (playbackTime / 1000) / 60
+                    val timeSeconds = (playbackTime / 1000) % 60
+                    val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
+                    
+                    val durationStr = if (playbackDuration > 0) {
+                        val durMinutes = (playbackDuration / 1000) / 60
+                        val durSeconds = (playbackDuration / 1000) % 60
+                        " / " + String.format(Locale.getDefault(), "%02d:%02d", durMinutes, durSeconds)
+                    } else ""
+
+                    Text(
+                        text = timeStr + durationStr,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
             
             Card(onClick = onToggleFavorite, modifier = Modifier.padding(horizontal = 4.dp)) {
