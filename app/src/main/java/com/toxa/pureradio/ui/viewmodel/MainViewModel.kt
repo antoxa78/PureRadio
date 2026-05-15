@@ -2,8 +2,11 @@ package com.toxa.pureradio.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.io.File
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.C
@@ -15,12 +18,18 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import com.toxa.pureradio.data.model.Station
 import com.toxa.pureradio.data.repository.RadioRepository
 import com.toxa.pureradio.network.Country
 import com.toxa.pureradio.network.Tag
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.system.exitProcess
 
@@ -41,6 +50,10 @@ data class GenreGroup(
 
 enum class ScreensaverMode {
     StationInfo, BlackScreen
+}
+
+enum class GenreSortMode {
+    Name, Count
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -79,8 +92,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedNavItem = MutableStateFlow(NavigationItem.Home)
     val selectedNavItem: StateFlow<NavigationItem> = _selectedNavItem
 
+    private val _genreSortMode = MutableStateFlow(GenreSortMode.Count)
+    val genreSortMode: StateFlow<GenreSortMode> = _genreSortMode
+
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
-    val tags: StateFlow<List<Tag>> = _tags
+    val tags: StateFlow<List<Tag>> = combine(_tags, _genreSortMode) { tags, mode ->
+        when (mode) {
+            GenreSortMode.Name -> tags.sortedBy { it.name.lowercase() }
+            GenreSortMode.Count -> tags.sortedByDescending { it.stationcount }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _countries = MutableStateFlow<List<Country>>(emptyList())
     val countries: StateFlow<List<Country>> = _countries
@@ -93,6 +114,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
+
+    private val _recentSearches = MutableStateFlow<List<String>>(loadRecentSearches())
+    val recentSearches: StateFlow<List<String>> = _recentSearches
 
     private val _favorites = MutableStateFlow<Set<String>>(loadFavoritesFromPrefs())
     val favorites: StateFlow<Set<String>> = _favorites
@@ -134,10 +158,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isScreensaverShowing = MutableStateFlow(false)
     val isScreensaverShowing: StateFlow<Boolean> = _isScreensaverShowing
 
+    private val _pendingImportStations = MutableStateFlow<List<Station>?>(null)
+    val pendingImportStations: StateFlow<List<Station>?> = _pendingImportStations
+
+    private val _filePickerState = MutableStateFlow<FilePickerState?>(null)
+    val filePickerState: StateFlow<FilePickerState?> = _filePickerState
+
+    private val _mediaMetadata = MutableStateFlow<androidx.media3.common.MediaMetadata?>(null)
+    val mediaMetadata: StateFlow<androidx.media3.common.MediaMetadata?> = _mediaMetadata
+
+    private val _audioFormat = MutableStateFlow<androidx.media3.common.Format?>(null)
+    val audioFormat: StateFlow<androidx.media3.common.Format?> = _audioFormat
+
     private val _audioPassthrough = MutableStateFlow(prefs.getBoolean("audio_passthrough", false))
     val audioPassthrough: StateFlow<Boolean> = _audioPassthrough
 
     private var lastInteractionTime = System.currentTimeMillis()
+    private var consecutiveErrors = 0
 
     init {
         initializePlayer()
@@ -153,12 +190,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @OptIn(UnstableApi::class)
     private fun initializePlayer() {
+        val context = getApplication() as Context
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
-        val builder = ExoPlayer.Builder(getApplication())
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .setAllowCrossProtocolRedirects(true)
+        
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(dataSourceFactory)
+
+        val builder = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
         
         if (_audioPassthrough.value) {
             val renderersFactory = DefaultRenderersFactory(getApplication())
@@ -174,10 +222,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         player = builder.build().apply {
             // Force 1.0 speed and pitch to ensure no resampling for time-stretching
-            setPlaybackParameters(androidx.media3.common.PlaybackParameters.DEFAULT)
+            playbackParameters = androidx.media3.common.PlaybackParameters.DEFAULT
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
-                    playNext()
+                    consecutiveErrors++
+                    if (consecutiveErrors < 5) {
+                        playNext(isAuto = true)
+                    } else {
+                        _error.value = "Playback failed: ${error.message}"
+                        stopPlayback()
+                        consecutiveErrors = 0
+                    }
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        consecutiveErrors = 0
+                        _error.value = null
+                    }
+                }
+
+                override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                    _mediaMetadata.value = mediaMetadata
+                }
+
+                override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                    // Try to extract format info from the active audio track
+                    for (group in tracks.groups) {
+                        if (group.type == C.TRACK_TYPE_AUDIO && group.isSelected) {
+                            for (i in 0 until group.length) {
+                                if (group.isTrackSelected(i)) {
+                                    _audioFormat.value = group.getTrackFormat(i)
+                                    break
+                                }
+                            }
+                        }
+                    }
                 }
             })
         }
@@ -260,13 +340,304 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putString("screensaver_mode", mode.name).apply()
     }
 
+    data class FilePickerState(
+        val currentPath: String,
+        val files: List<File>,
+        val isExport: Boolean,
+        val suggestedFileName: String = ""
+    )
+
+    fun openFilePicker(isExport: Boolean, suggestedFileName: String = "") {
+        val root = Environment.getExternalStorageDirectory() ?: File("/")
+        // If we are in the root, also try to find 'Download' folder which is most common on TV
+        val initialDir = if (!isExport) {
+            val downloadDir = File(root, "Download")
+            if (downloadDir.exists() && downloadDir.isDirectory) downloadDir else root
+        } else {
+            root
+        }
+        
+        _filePickerState.value = FilePickerState(
+            currentPath = initialDir.absolutePath,
+            files = listFiles(initialDir),
+            isExport = isExport,
+            suggestedFileName = suggestedFileName
+        )
+    }
+
+    fun closeFilePicker() {
+        _filePickerState.value = null
+    }
+
+    fun navigateInFilePicker(directory: File) {
+        val currentState = _filePickerState.value ?: return
+        _filePickerState.value = currentState.copy(
+            currentPath = directory.absolutePath,
+            files = listFiles(directory)
+        )
+    }
+
+    fun navigateUpFilePicker() {
+        val currentState = _filePickerState.value ?: return
+        val currentFile = File(currentState.currentPath)
+        val parent = currentFile.parentFile ?: return
+        _filePickerState.value = currentState.copy(
+            currentPath = parent.absolutePath,
+            files = listFiles(parent)
+        )
+    }
+
+    private fun listFiles(directory: File): List<File> {
+        val files = directory.listFiles()
+        if (files == null) {
+            _error.value = "Permission Denied: Cannot access ${directory.name}. Ensure storage permissions are granted in System Settings."
+            return emptyList()
+        }
+        return files.toList().sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+    }
+
+    fun handleFileSelection(file: File) {
+        val currentState = _filePickerState.value ?: return
+        if (currentState.isExport) {
+            val targetFile = if (file.isDirectory) {
+                File(file, currentState.suggestedFileName)
+            } else {
+                file
+            }
+            saveFavoritesToFile(targetFile)
+            closeFilePicker()
+        } else {
+            if (!file.isDirectory) {
+                prepareImportFavoritesFromFile(file)
+            }
+        }
+    }
+
+    private fun prepareImportFavoritesFromFile(file: File) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val lines = file.readLines()
+                val importedStations = parsePlaylistLines(lines)
+                
+                if (importedStations.isNotEmpty()) {
+                    _pendingImportStations.value = importedStations
+                    // Don't close file picker yet if we need dialog, or close it and show dialog?
+                    // Better to close file picker and show the restore dialog on top of settings.
+                    closeFilePicker()
+                } else {
+                    _error.value = "No stations found in file"
+                    closeFilePicker()
+                }
+            } catch (e: Exception) {
+                _error.value = "Import failed: ${e.message}"
+                closeFilePicker()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun confirmRestore(replace: Boolean) {
+        val stations = _pendingImportStations.value ?: return
+        if (replace) {
+            _favorites.value = emptySet()
+            _favoriteStations.value = emptyList()
+        }
+        mergeImportedStations(stations)
+        _pendingImportStations.value = null
+    }
+
+    fun cancelRestore() {
+        _pendingImportStations.value = null
+    }
+
+    private fun saveFavoritesToFile(file: File) {
+        viewModelScope.launch {
+            try {
+                val content = generateM3uContent()
+                file.writeText(content)
+                _error.value = "Favorites exported to ${file.name}"
+            } catch (e: Exception) {
+                _error.value = "Export failed: ${e.message}"
+            }
+        }
+    }
+
+    private fun generateM3uContent(): String {
+        val stations = _favoriteStations.value
+        val content = StringBuilder("#EXTM3U\n")
+        stations.forEach { station ->
+            content.append("#EXTINF:-1 tvg-id=\"${station.stationUuid}\" tvg-logo=\"${station.favicon}\" group-title=\"${station.tags}\" tvg-country=\"${station.countryCode ?: ""}\",${station.name}\n")
+            // Custom tag for full station metadata recovery
+            content.append("#EXT-X-PURE-RADIO-DATA:uuid=${station.stationUuid};name=${station.name};favicon=${station.favicon};tags=${station.tags};country=${station.country};countrycode=${station.countryCode ?: ""};lang=${station.language};votes=${station.votes};codec=${station.codec};bitrate=${station.bitrate}\n")
+            content.append("${station.url}\n")
+        }
+        return content.toString()
+    }
+
+    private fun parsePlaylistLines(lines: List<String>): List<Station> {
+        if (lines.isEmpty()) return emptyList()
+        
+        val firstLine = lines.firstOrNull { it.isNotBlank() } ?: return emptyList()
+        
+        return when {
+            firstLine.trim().startsWith("#EXTM3U", ignoreCase = true) -> parseM3uLines(lines)
+            firstLine.trim().startsWith("[playlist]", ignoreCase = true) -> parsePlsLines(lines)
+            else -> {
+                // Try M3U even if no header, or just plain list of URLs
+                parseM3uLines(lines)
+            }
+        }
+    }
+
+    private fun parsePlsLines(lines: List<String>): List<Station> {
+        val importedStations = mutableListOf<Station>()
+        val entries = mutableMapOf<Int, MutableMap<String, String>>()
+        
+        for (line in lines) {
+            val trimmedLine = line.trim()
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("[") || trimmedLine.startsWith("#")) continue
+            
+            val parts = trimmedLine.split("=", limit = 2)
+            if (parts.size < 2) continue
+            
+            val key = parts[0].trim()
+            val value = parts[1].trim()
+            
+            // Expected keys: FileN, TitleN, LengthN
+            val keyName = key.filter { it.isLetter() }.lowercase()
+            val index = key.filter { it.isDigit() }.toIntOrNull() ?: continue
+            
+            val entry = entries.getOrPut(index) { mutableMapOf() }
+            entry[keyName] = value
+        }
+        
+        entries.keys.sorted().forEach { index ->
+            val entry = entries[index] ?: return@forEach
+            val url = entry["file"] ?: return@forEach
+            val name = entry["title"] ?: url.substringAfterLast("/").substringBefore("?")
+            
+            importedStations.add(Station(
+                stationUuid = java.util.UUID.randomUUID().toString(),
+                name = name,
+                url = url,
+                favicon = "",
+                tags = "",
+                country = "",
+                countryCode = null,
+                language = "",
+                votes = 0,
+                codec = "",
+                bitrate = 0
+            ))
+        }
+        
+        return importedStations
+    }
+
+    private fun parseM3uLines(lines: List<String>): List<Station> {
+        val importedStations = mutableListOf<Station>()
+        var currentName = ""
+        var currentUuid = ""
+        var currentFavicon = ""
+        var currentTags = ""
+        var currentCountry = ""
+        var currentCountryCode = ""
+        var currentLanguage = ""
+        var currentVotes = 0
+        var currentCodec = ""
+        var currentBitrate = 0
+        
+        for (line in lines) {
+            val trimmedLine = line.trim()
+            when {
+                trimmedLine.startsWith("#EXT-X-PURE-RADIO-DATA:") -> {
+                    val data = trimmedLine.removePrefix("#EXT-X-PURE-RADIO-DATA:").split(";")
+                    val map = data.associate { 
+                        val parts = it.split("=")
+                        if (parts.size == 2) parts[0] to parts[1] else "" to ""
+                    }
+                    currentUuid = map["uuid"] ?: ""
+                    currentName = map["name"] ?: ""
+                    currentFavicon = map["favicon"] ?: ""
+                    currentTags = map["tags"] ?: ""
+                    currentCountry = map["country"] ?: ""
+                    currentCountryCode = map["countrycode"] ?: ""
+                    currentLanguage = map["lang"] ?: ""
+                    currentVotes = map["votes"]?.toIntOrNull() ?: 0
+                    currentCodec = map["codec"] ?: ""
+                    currentBitrate = map["bitrate"]?.toIntOrNull() ?: 0
+                }
+                trimmedLine.startsWith("#EXTINF:") -> {
+                    if (currentUuid.isEmpty()) {
+                        val regex = "tvg-id=\"([^\"]*)\"".toRegex()
+                        currentUuid = regex.find(trimmedLine)?.groupValues?.get(1) ?: ""
+                    }
+                    if (currentFavicon.isEmpty()) {
+                        val regex = "tvg-logo=\"([^\"]*)\"".toRegex()
+                        currentFavicon = regex.find(trimmedLine)?.groupValues?.get(1) ?: ""
+                    }
+                    val namePart = trimmedLine.split(",").lastOrNull() ?: ""
+                    if (currentName.isEmpty()) currentName = namePart.trim()
+                }
+                !trimmedLine.startsWith("#") && trimmedLine.isNotBlank() -> {
+                    val url = trimmedLine
+                    val name = if (currentName.isNotEmpty()) currentName else url.substringAfterLast("/").substringBefore("?")
+                    
+                    importedStations.add(Station(
+                        stationUuid = if (currentUuid.isNotEmpty()) currentUuid else java.util.UUID.randomUUID().toString(),
+                        name = name,
+                        url = url,
+                        favicon = currentFavicon,
+                        tags = currentTags,
+                        country = currentCountry,
+                        countryCode = currentCountryCode,
+                        language = currentLanguage,
+                        votes = currentVotes,
+                        codec = currentCodec,
+                        bitrate = currentBitrate
+                    ))
+                    
+                    // Reset for next station
+                    currentName = ""; currentUuid = ""; currentFavicon = ""; currentTags = ""
+                    currentCountry = ""; currentCountryCode = ""; currentLanguage = ""
+                    currentVotes = 0; currentCodec = ""; currentBitrate = 0
+                }
+            }
+        }
+        return importedStations
+    }
+
+    private fun mergeImportedStations(importedStations: List<Station>) {
+        val currentFavorites = _favorites.value.toMutableSet()
+        val currentStationList = _favoriteStations.value.toMutableList()
+        
+        importedStations.forEach { station ->
+            if (!currentFavorites.contains(station.stationUuid)) {
+                currentFavorites.add(station.stationUuid)
+                currentStationList.add(station)
+            }
+        }
+        
+        _favorites.value = currentFavorites
+        _favoriteStations.value = currentStationList
+        saveFavoritesToPrefs(currentFavorites, currentStationList)
+        if (_selectedNavItem.value == NavigationItem.Favourites) {
+            _stations.value = currentStationList
+        }
+        refreshFavoriteStations()
+    }
+
     private fun startPlaybackTimer() {
         viewModelScope.launch {
             while (true) {
                 if (_isPlaying.value) {
                     _playbackTime.value = player?.currentPosition ?: 0L
                     val duration = player?.duration ?: 0L
-                    _playbackDuration.value = if (duration > 0) duration else 0L
+                    // Live streams should not show a progress bar
+                    val isLive = player?.isCurrentMediaItemLive ?: false
+                    _playbackDuration.value = if (duration > 0 && !isLive) duration else 0L
                 }
                 kotlinx.coroutines.delay(1000)
             }
@@ -301,6 +672,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadFavoritesFromPrefs(): Set<String> {
         return prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+    }
+
+    private fun loadRecentSearches(): List<String> {
+        val json = prefs.getString("recent_searches_json", null) ?: return emptyList()
+        return try {
+            com.google.gson.Gson().fromJson(json, object : com.google.gson.reflect.TypeToken<List<String>>() {}.type)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveRecentSearches(searches: List<String>) {
+        val json = com.google.gson.Gson().toJson(searches)
+        prefs.edit().putString("recent_searches_json", json).apply()
+    }
+
+    fun addToRecentSearches(query: String) {
+        if (query.length < 3) return
+        val current = _recentSearches.value.toMutableList()
+        
+        current.removeAll { it.equals(query, ignoreCase = true) }
+        current.add(0, query)
+        
+        if (current.size > 12) current.removeAt(current.size - 1)
+        _recentSearches.value = current
+        saveRecentSearches(current)
+    }
+
+    fun clearRecentSearches() {
+        _recentSearches.value = emptyList()
+        saveRecentSearches(emptyList())
     }
 
     private fun loadFavoriteStationsFromPrefs(): List<Station> {
@@ -372,6 +774,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _settingsSubMenu.value = menu
     }
 
+    fun setError(message: String) {
+        _error.value = message
+    }
+
+    fun clearError() {
+        _error.value = null
+    }
+
+    fun setGenreSortMode(mode: GenreSortMode) {
+        _genreSortMode.value = mode
+    }
+
     fun toggleGenreVisibility(tagName: String) {
         val current = _visibleGenres.value.toMutableSet()
         if (current.contains(tagName)) {
@@ -417,16 +831,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             NavigationItem.Popular -> loadPopularStations()
             NavigationItem.Recent -> {
                 _allStations.value = _recentStations.value
-                applyFilters()
+                _stations.value = _recentStations.value // Don't apply bitrate filtering
                 refreshRecentStations()
             }
             NavigationItem.Genres -> loadTags()
             NavigationItem.Countries -> loadCountries()
             NavigationItem.Favourites -> loadFavorites()
             NavigationItem.Search -> {
-                _allStations.value = emptyList()
-                _stations.value = emptyList()
                 _genreGroups.value = emptyList()
+                if (_searchQuery.value.length > 2) {
+                    searchStations(_searchQuery.value)
+                } else {
+                    _allStations.value = emptyList()
+                    _stations.value = emptyList()
+                }
             }
             else -> {
                 _allStations.value = emptyList()
@@ -618,6 +1036,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadFavorites() {
         _stations.value = _favoriteStations.value
+        _allStations.value = _favoriteStations.value // Keep in sync but don't filter
         refreshFavoriteStations()
     }
 
@@ -640,6 +1059,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         if (_selectedNavItem.value == NavigationItem.Favourites) {
             _stations.value = currentStationList
+        }
+    }
+
+    fun exportFavoritesToM3u(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val context = getApplication() as Context
+                val content = generateM3uContent()
+                
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(content.toByteArray())
+                }
+                _error.value = "Favorites exported successfully"
+            } catch (e: Exception) {
+                _error.value = "Export failed: ${e.message}"
+            }
+        }
+    }
+
+    fun importFavoritesFromM3u(uri: Uri) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val context = getApplication() as Context
+                var importedStations = emptyList<Station>()
+                
+                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val lines = inputStream.bufferedReader().readLines()
+                    importedStations = parsePlaylistLines(lines)
+                }
+                
+                if (importedStations.isNotEmpty()) {
+                    mergeImportedStations(importedStations)
+                    _error.value = "Imported ${importedStations.size} stations"
+                    refreshFavoriteStations() // Sync with server data if possible
+                } else {
+                    _error.value = "No stations found in file"
+                }
+            } catch (e: Exception) {
+                _error.value = "Import failed: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -698,7 +1160,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playStation(station: Station) {
+    fun playStation(station: Station, resetErrors: Boolean = true) {
+        if (resetErrors) consecutiveErrors = 0
+        _isLoading.value = false
         var finalStation = station
         if (finalStation.countryCode.isNullOrEmpty()) {
             _allStations.value.find { it.stationUuid == station.stationUuid && !it.countryCode.isNullOrEmpty() }?.let {
@@ -706,41 +1170,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
+        if (_selectedNavItem.value == NavigationItem.Search && _searchQuery.value.length > 2) {
+            addToRecentSearches(_searchQuery.value)
+        }
+
         addToRecent(finalStation)
         _currentStation.value = finalStation
+        _error.value = null
+        _mediaMetadata.value = null
+        _audioFormat.value = null
         player?.let {
             it.stop()
             it.clearMediaItems()
-            val mediaItem = MediaItem.fromUri(station.url)
-            it.setMediaItem(mediaItem)
+            
+            val mediaItemBuilder = MediaItem.Builder()
+                .setUri(finalStation.url)
+                .setMediaId(finalStation.stationUuid)
+            
+            if (finalStation.url.contains("m3u8", ignoreCase = true) || 
+                finalStation.codec.equals("hls", ignoreCase = true)) {
+                mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+            }
+            
+            it.setMediaItem(mediaItemBuilder.build())
             it.prepare()
             it.play()
             _isPlaying.value = true
         }
     }
 
-    fun playNext() {
+    fun playNext(isAuto: Boolean = false) {
         val current = _currentStation.value ?: return
-        val list = if (_selectedNavItem.value == NavigationItem.Home && _visibleGenres.value.isNotEmpty()) {
-            _genreGroups.value.flatMap { it.stations }
+        
+        // Use the primary filtered list if the current station is in it
+        val activeList = _stations.value
+        val indexInActive = activeList.indexOfFirst { it.stationUuid == current.stationUuid }
+        
+        val list = if (indexInActive != -1) {
+            activeList
+        } else if (_selectedNavItem.value == NavigationItem.Home && 
+                       _visibleGenres.value.isNotEmpty() && 
+                       _selectedTag.value == null && 
+                       _selectedCountry.value == null) {
+            val bitrates = _selectedBitrates.value
+            _genreGroups.value.flatMap { group ->
+                group.stations.filter { matchesBitrateFilter(it, bitrates) }
+            }
         } else {
             _stations.value
         }
+        
         if (list.isEmpty()) return
+
+        // If there's only one station and it failed, stop to avoid infinite loop
+        if (list.size == 1 && list[0].stationUuid == current.stationUuid) {
+            _error.value = "Station unavailable"
+            stopPlayback()
+            return
+        }
+
         val index = list.indexOfFirst { it.stationUuid == current.stationUuid }
         if (index != -1) {
             val nextIndex = (index + 1) % list.size
-            playStation(list[nextIndex])
+            playStation(list[nextIndex], !isAuto)
         }
     }
 
     fun playPrevious() {
         val current = _currentStation.value ?: return
-        val list = if (_selectedNavItem.value == NavigationItem.Home && _visibleGenres.value.isNotEmpty()) {
-            _genreGroups.value.flatMap { it.stations }
+        
+        val activeList = _stations.value
+        val indexInActive = activeList.indexOfFirst { it.stationUuid == current.stationUuid }
+        
+        val list = if (indexInActive != -1) {
+            activeList
+        } else if (_selectedNavItem.value == NavigationItem.Home && 
+                       _visibleGenres.value.isNotEmpty() && 
+                       _selectedTag.value == null && 
+                       _selectedCountry.value == null) {
+            val bitrates = _selectedBitrates.value
+            _genreGroups.value.flatMap { group ->
+                group.stations.filter { matchesBitrateFilter(it, bitrates) }
+            }
         } else {
             _stations.value
         }
+
         if (list.isEmpty()) return
         val index = list.indexOfFirst { it.stationUuid == current.stationUuid }
         if (index != -1) {
@@ -768,6 +1283,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchStations(query: String) {
+        if (query.isEmpty()) return
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null

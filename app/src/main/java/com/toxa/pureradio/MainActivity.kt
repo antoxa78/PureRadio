@@ -1,9 +1,13 @@
 package com.toxa.pureradio
 
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.activity.viewModels
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -37,6 +41,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +49,8 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
@@ -58,10 +65,15 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.TheaterComedy
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextFieldDefaults
@@ -71,6 +83,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +99,10 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import com.toxa.pureradio.BuildConfig
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Button
@@ -98,6 +115,8 @@ import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.NavigationDrawer
 import androidx.tv.material3.NavigationDrawerItem
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.rememberDrawerState
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -183,6 +202,57 @@ fun MainScreen(viewModel: MainViewModel) {
     val playbackTime by viewModel.playbackTime.collectAsState()
     val isScreensaverShowing by viewModel.isScreensaverShowing.collectAsState()
     val visibleGenres by viewModel.visibleGenres.collectAsState()
+    val mediaMetadata by viewModel.mediaMetadata.collectAsState()
+    val audioFormat by viewModel.audioFormat.collectAsState()
+    val filePickerState by viewModel.filePickerState.collectAsState()
+    val pendingImportStations by viewModel.pendingImportStations.collectAsState()
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.importFavoritesFromM3u(it) }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*")
+    ) { uri: Uri? ->
+        uri?.let { viewModel.exportFavoritesToM3u(it) }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                try {
+                    val intent = Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                        context.startActivity(intent)
+                    } catch (e2: Exception) {}
+                }
+            }
+        } else {
+            val permission = android.Manifest.permission.READ_EXTERNAL_STORAGE
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(permission)
+            }
+        }
+    }
+
+    LaunchedEffect(error) {
+        if (error != null) {
+            delay(5000)
+            viewModel.clearError()
+        }
+    }
 
     var stationToFavorite by remember { mutableStateOf<Station?>(null) }
     var isDialogReady by remember { mutableStateOf(false) }
@@ -191,6 +261,26 @@ fun MainScreen(viewModel: MainViewModel) {
     val drawerFocusRequesters = remember { NavigationItem.entries.associateWith { FocusRequester() } }
     val dialogFocusRequester = remember { FocusRequester() }
     val cancelFocusRequester = remember { FocusRequester() }
+
+    val isDrawerOpen = drawerState.currentValue == DrawerValue.Open
+    BackHandler {
+        if (isDrawerOpen) {
+            // Exit only from the Main Menu (Drawer)
+            kotlin.system.exitProcess(0)
+        } else {
+            when {
+                pendingImportStations != null -> viewModel.cancelRestore()
+                filePickerState != null -> viewModel.closeFilePicker()
+                settingsSubMenu != null -> viewModel.setSettingsSubMenu(null)
+                selectedTag != null -> viewModel.selectTag(null)
+                selectedCountry != null -> viewModel.selectCountry(null)
+                else -> {
+                    // From any root section, return to the Main Menu (Navigation Drawer)
+                    try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
+                }
+            }
+        }
+    }
 
     LaunchedEffect(drawerState.currentValue) {
         if (drawerState.currentValue == DrawerValue.Open) {
@@ -208,38 +298,21 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    BackHandler(enabled = true) {
-        if (stationToFavorite != null) {
-            stationToFavorite = null
-        } else if (selectedTag != null) {
-            viewModel.selectTag(null)
-        } else if (selectedCountry != null) {
-            viewModel.selectCountry(null)
-        } else if (settingsSubMenu != null) {
-            viewModel.setSettingsSubMenu(null)
-        } else if (drawerState.currentValue == DrawerValue.Closed) {
-            drawerState.setValue(DrawerValue.Open)
-            try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
-        } else {
-            (context as? android.app.Activity)?.finish()
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
         NavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .padding(vertical = 16.dp, horizontal = 4.dp)
                         .onFocusChanged { 
                             if (it.hasFocus) {
                                 drawerState.setValue(DrawerValue.Open)
                             } else {
                                 drawerState.setValue(DrawerValue.Closed)
                             }
-                        }
+                        },
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 140.dp, start = 4.dp, end = 4.dp)
                 ) {
                     items(NavigationItem.entries) { item ->
                         NavigationDrawerItem(
@@ -278,8 +351,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                 }
-            },
-            modifier = Modifier.weight(1f)
+            }
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 val title = when {
@@ -385,7 +457,47 @@ fun MainScreen(viewModel: MainViewModel) {
                                 }
                             }
                             NavigationItem.Settings -> {
-                                SettingsScreen(viewModel)
+                                SettingsScreen(
+                                    viewModel, 
+                                    onImportPlaylist = { 
+                                        try {
+                                            importLauncher.launch("*/*") 
+                                        } catch (e: Exception) {
+                                            viewModel.setError("System picker unavailable. Using Internal Explorer.")
+                                            viewModel.openFilePicker(isExport = false)
+                                        }
+                                    },
+                                    onExportPlaylist = { 
+                                        try {
+                                            exportLauncher.launch("pure_radio_favorites.m3u") 
+                                        } catch (e: Exception) {
+                                            viewModel.setError("System picker unavailable. Using Internal Explorer.")
+                                            viewModel.openFilePicker(isExport = true, suggestedFileName = "pure_radio_favorites.m3u")
+                                        }
+                                    },
+                                    onPermissionRequest = {
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                            if (!android.os.Environment.isExternalStorageManager()) {
+                                                try {
+                                                    val intent = Intent(
+                                                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                                        Uri.parse("package:${context.packageName}")
+                                                    )
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    try {
+                                                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                                        context.startActivity(intent)
+                                                    } catch (e2: Exception) {}
+                                                }
+                                            } else {
+                                                viewModel.setError("All Files Access already granted")
+                                            }
+                                        } else {
+                                            permissionLauncher.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                                        }
+                                    }
+                                )
                             }
                             NavigationItem.Exit -> {}
                         }
@@ -398,6 +510,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 LinearProgressIndicator(
+                                    modifier = Modifier.width(200.dp),
                                     color = MaterialTheme.colorScheme.primary,
                                     trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
                                 )
@@ -411,22 +524,36 @@ fun MainScreen(viewModel: MainViewModel) {
                         }
                     }
                 }
+                
+                // Add spacer to push content above NowPlayingBar when it's present
+                if (currentStation != null) {
+                    Spacer(modifier = Modifier.height(115.dp))
+                }
             }
         }
 
+        // Overlay NowPlayingBar at the bottom of the screen
         currentStation?.let { station ->
             val playbackDuration by viewModel.playbackDuration.collectAsState()
-            NowPlayingBar(
-                station = station,
-                isPlaying = isPlaying,
-                isFavorite = favorites.contains(station.stationUuid),
-                playbackTime = playbackTime,
-                playbackDuration = playbackDuration,
-                onTogglePlay = { viewModel.togglePlayPause() },
-                onToggleFavorite = { viewModel.toggleFavorite(station) },
-                onNext = { viewModel.playNext() },
-                onPrevious = { viewModel.playPrevious() }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                NowPlayingBar(
+                    station = station,
+                    isPlaying = isPlaying,
+                    isFavorite = favorites.contains(station.stationUuid),
+                    playbackTime = playbackTime,
+                    playbackDuration = playbackDuration,
+                    mediaMetadata = mediaMetadata,
+                    audioFormat = audioFormat,
+                    onTogglePlay = { viewModel.togglePlayPause() },
+                    onToggleFavorite = { viewModel.toggleFavorite(station) },
+                    onNext = { viewModel.playNext() },
+                    onPrevious = { viewModel.playPrevious() }
+                )
+            }
         }
     }
 
@@ -434,43 +561,80 @@ fun MainScreen(viewModel: MainViewModel) {
         Screensaver(viewModel)
     }
 
+    filePickerState?.let { state ->
+        FilePicker(
+            state = state,
+            onNavigate = { viewModel.navigateInFilePicker(it) },
+            onNavigateUp = { viewModel.navigateUpFilePicker() },
+            onSelected = { viewModel.handleFileSelection(it) },
+            onDismiss = { viewModel.closeFilePicker() }
+        )
+    }
+
     stationToFavorite?.let { station ->
         val isAlreadyFavorite = favorites.contains(station.stationUuid)
         Dialog(onDismissRequest = { stationToFavorite = null }) {
             Surface(
-                modifier = Modifier.padding(16.dp),
-                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.width(420.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = SurfaceDefaults.colors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    shape = MaterialTheme.shapes.extraLarge
                 )
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isAlreadyFavorite) Icons.Default.FavoriteBorder else Icons.Default.Favorite,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = if (isAlreadyFavorite) "Remove station from favourites?" else "Add station to favourites?",
+                        text = if (isAlreadyFavorite) "Remove from Collection?" else "Add to Collection?",
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = station.name,
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Button(
                             onClick = { if (isDialogReady) stationToFavorite = null },
-                            modifier = Modifier.focusRequester(cancelFocusRequester)
+                            modifier = Modifier.weight(1f).focusRequester(cancelFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         ) {
-                            Text("Cancel")
+                            Text("CANCEL", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Button(
                             onClick = {
                                 if (isDialogReady) {
@@ -478,9 +642,118 @@ fun MainScreen(viewModel: MainViewModel) {
                                     stationToFavorite = null
                                 }
                             },
-                            modifier = Modifier.focusRequester(dialogFocusRequester)
+                            modifier = Modifier.weight(1f).focusRequester(dialogFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = if (isAlreadyFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                contentColor = if (isAlreadyFavorite) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary
+                            )
                         ) {
-                            Text(if (isAlreadyFavorite) "Remove" else "Add")
+                            Text(
+                                if (isAlreadyFavorite) "REMOVE" else "ADD",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pendingImportStations?.let { stations ->
+        var showConfirmation by remember { mutableStateOf(false) }
+        val restoreFocusRequester = remember { FocusRequester() }
+
+        if (!showConfirmation) {
+            Dialog(onDismissRequest = { viewModel.cancelRestore() }) {
+                Surface(
+                    modifier = Modifier.width(420.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    colors = SurfaceDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    border = androidx.tv.material3.Border(
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                        shape = MaterialTheme.shapes.extraLarge
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Restore Favourites", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Found ${stations.size} stations. Choose action:", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                        
+                        Button(
+                            onClick = { viewModel.confirmRestore(replace = false) },
+                            modifier = Modifier.fillMaxWidth().focusRequester(restoreFocusRequester)
+                        ) {
+                            Text("Add to current favorites", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { showConfirmation = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Replace all favorites", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { viewModel.cancelRestore() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Cancel", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        
+                        LaunchedEffect(Unit) {
+                            try { restoreFocusRequester.requestFocus() } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        } else {
+            Dialog(onDismissRequest = { showConfirmation = false }) {
+                Surface(
+                    modifier = Modifier.width(420.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    colors = SurfaceDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    border = androidx.tv.material3.Border(
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        shape = MaterialTheme.shapes.extraLarge
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Are you sure?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("This will delete all your current favorites and replace them with the ones from the file.", 
+                            style = MaterialTheme.typography.bodyMedium, 
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Button(
+                                onClick = { showConfirmation = false },
+                                modifier = Modifier.weight(1f).focusRequester(restoreFocusRequester)
+                            ) {
+                                Text("No", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+                            Button(
+                                onClick = { viewModel.confirmRestore(replace = true) },
+                                modifier = Modifier.weight(1f),
+                                colors = androidx.tv.material3.ButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Yes", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+                        }
+                        
+                        LaunchedEffect(Unit) {
+                            try { restoreFocusRequester.requestFocus() } catch (_: Exception) {}
                         }
                     }
                 }
@@ -525,7 +798,13 @@ fun BitrateFilters(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: MainViewModel) {
+fun SettingsScreen(
+    viewModel: MainViewModel, 
+    onImportPlaylist: () -> Unit,
+    onExportPlaylist: () -> Unit,
+    onPermissionRequest: () -> Unit
+) {
+    androidx.compose.ui.platform.LocalContext.current
     val visibleGenres by viewModel.visibleGenres.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val settingsSubMenu by viewModel.settingsSubMenu.collectAsState()
@@ -537,6 +816,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val screensaverTimeout by viewModel.screensaverTimeout.collectAsState()
     val screensaverMode by viewModel.screensaverMode.collectAsState()
     val audioPassthrough by viewModel.audioPassthrough.collectAsState()
+    val genreSortMode by viewModel.genreSortMode.collectAsState()
 
     val subMenuFocusRequester = remember { FocusRequester() }
     val mainMenuFocusRequester = remember { FocusRequester() }
@@ -551,7 +831,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
     when (settingsSubMenu) {
         "HomeGenres" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -562,6 +845,26 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text("Personalize Home Tab", style = MaterialTheme.typography.headlineMedium)
+                        
+                        Spacer(modifier = Modifier.weight(1f))
+                        
+                        Text("Sort: ", style = MaterialTheme.typography.labelLarge)
+                        com.toxa.pureradio.ui.viewmodel.GenreSortMode.entries.forEach { mode ->
+                            Button(
+                                onClick = { viewModel.setGenreSortMode(mode) },
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                                colors = if (genreSortMode == mode) {
+                                    androidx.tv.material3.ButtonDefaults.colors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                } else {
+                                    androidx.tv.material3.ButtonDefaults.colors()
+                                }
+                            ) {
+                                Text(mode.name)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -572,6 +875,9 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         headlineContent = { 
                             Text(tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }) 
                         },
+                        supportingContent = {
+                            Text("${tag.stationcount} stations")
+                        },
                         trailingContent = {
                             Checkbox(checked = visibleGenres.contains(tag.name), onCheckedChange = null)
                         }
@@ -580,7 +886,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         "AutoUpdate" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -617,7 +926,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         "Screensaver" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -683,7 +995,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         else -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
                 item {
                     Text("System Settings", style = MaterialTheme.typography.headlineLarge)
                     Spacer(modifier = Modifier.height(24.dp))
@@ -763,6 +1078,37 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 }
 
                 item {
+                    Text("DATA MANAGEMENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    
+                    ListItem(
+                        selected = false,
+                        onClick = { 
+                            viewModel.openFilePicker(isExport = true, suggestedFileName = "pure_radio_favorites.m3u")
+                        },
+                        headlineContent = { Text("Backup Favourites") },
+                        supportingContent = { Text("Export your collection using the built-in file manager") },
+                        leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    )
+                    ListItem(
+                        selected = false,
+                        onClick = { 
+                            viewModel.openFilePicker(isExport = false)
+                        },
+                        headlineContent = { Text("Restore Favourites") },
+                        supportingContent = { Text("Browse local storage using the built-in file manager") },
+                        leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    )
+
+                    ListItem(
+                        selected = false,
+                        onClick = onPermissionRequest,
+                        headlineContent = { Text("Grant Storage Permissions") },
+                        supportingContent = { Text("Try this if you cannot see files. Opens system permissions menu.") },
+                        leadingContent = { Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    )
+                }
+
+                item {
                     ListItem(
                         selected = false,
                         onClick = { viewModel.updateDatabase() },
@@ -776,12 +1122,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         leadingContent = { Icon(Icons.Default.Radio, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
                     )
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp),
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Surface(
@@ -818,9 +1164,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    "Build: 2025-01-30 14:30",
+                                    "Build: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(BuildConfig.BUILD_TIME))} • v${BuildConfig.VERSION_NAME}",
                                     style = MaterialTheme.typography.labelSmall, 
                                     color = Color.Gray
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "https://github.com/antoxa78/PureRadio",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                                 )
                             }
                         }
@@ -835,6 +1187,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val stations by viewModel.stations.collectAsState()
+    val recentSearches by viewModel.recentSearches.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val focusRequester = remember { FocusRequester() }
 
@@ -853,6 +1206,12 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) 
                     .padding(bottom = 16.dp)
                     .focusRequester(focusRequester),
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        viewModel.addToRecentSearches(searchQuery)
+                    }
+                ),
                 colors = TextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
@@ -869,7 +1228,21 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) 
         }
         
         if (stations.isEmpty() && searchQuery.isEmpty()) {
-            Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
+            if (recentSearches.isNotEmpty()) {
+                Text("Recent Searches", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                LazyRow {
+                    items(recentSearches) { query ->
+                        Button(
+                            onClick = { viewModel.onSearchQueryChange(query) },
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(query)
+                        }
+                    }
+                }
+            } else {
+                Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
+            }
         } else {
             Box(modifier = Modifier.weight(1f)) {
                 StationGrid(stations, viewModel, autoFocus = false, onLongClick = onLongClick)
@@ -891,7 +1264,7 @@ fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupC
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
-            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             itemsIndexed(groups) { index, group ->
@@ -1059,7 +1432,7 @@ fun StationGrid(
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
-            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             itemsIndexed(stations) { index, station ->
@@ -1090,7 +1463,7 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
-            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             itemsIndexed(tags) { index, tag ->
@@ -1173,7 +1546,7 @@ fun CountryGrid(
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
-            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             itemsIndexed(countries) { index, country ->
@@ -1257,6 +1630,12 @@ fun StationCard(
             .padding(8.dp)
             .height(180.dp),
         scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f),
+        glow = androidx.tv.material3.CardDefaults.glow(
+            focusedGlow = androidx.tv.material3.Glow(
+                elevationColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                elevation = 12.dp
+            )
+        ),
         border = androidx.tv.material3.CardDefaults.border(
             focusedBorder = androidx.tv.material3.Border(
                 border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
@@ -1344,13 +1723,15 @@ fun StationCard(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, UnstableApi::class)
 @Composable
 fun Screensaver(viewModel: MainViewModel) {
     val currentStation by viewModel.currentStation.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackTime by viewModel.playbackTime.collectAsState()
     val screensaverMode by viewModel.screensaverMode.collectAsState()
+    val audioFormat by viewModel.audioFormat.collectAsState()
+    val mediaMetadata by viewModel.mediaMetadata.collectAsState()
     val focusRequester = remember { FocusRequester() }
 
     val infiniteTransition = rememberInfiniteTransition(label = "BouncingTransition")
@@ -1397,32 +1778,97 @@ fun Screensaver(viewModel: MainViewModel) {
             ) {
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth(0.6f)
+                        .fillMaxWidth(0.8f)
                         .align(Alignment.Center)
                         .offset(
-                            x = (xOffset * 500).dp,
-                            y = (yOffset * 300).dp
+                            x = (xOffset * 400).dp,
+                            y = (yOffset * 200).dp
                         ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     currentStation?.let { station ->
-                        AsyncImage(
-                            model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
-                            contentDescription = null,
-                            modifier = Modifier.size(240.dp),
-                            contentScale = ContentScale.Fit,
-                            error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
-                            placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                                contentDescription = null,
+                                modifier = Modifier.size(260.dp),
+                                contentScale = ContentScale.Fit,
+                                error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
+                                placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                            )
+                            
+                            val code = station.countryCode?.trim()?.lowercase()
+                            if (!code.isNullOrEmpty() && code.length == 2) {
+                                AsyncImage(
+                                    model = "https://flagcdn.com/w80/$code.png",
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .align(Alignment.TopStart)
+                                        .offset(x = (-20).dp, y = (-10).dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        }
+                        
                         Spacer(modifier = Modifier.height(32.dp))
+                        
+                        // Technical info
+                        val technicalInfo = audioFormat?.let { format ->
+                            val kbps = if (format.bitrate > 0) "${format.bitrate / 1000}k" else "${station.bitrate}k"
+                            val samplerate = if (format.sampleRate > 0) "${format.sampleRate / 1000}kHz" else ""
+                            val codec = format.sampleMimeType?.removePrefix("audio/")?.uppercase()
+                                ?.replace("MPEG", "MP3")
+                                ?.replace("MP4A-LATM", "AAC")
+                                ?: station.codec.orEmpty().uppercase()
+                            val channels = when (format.channelCount) {
+                                1 -> "Mono"
+                                2 -> "Stereo"
+                                in 3..8 -> "${format.channelCount}ch"
+                                else -> ""
+                            }
+                            listOfNotNull(codec, kbps, samplerate, channels).joinToString(" ")
+                        } ?: "${station.bitrate}k"
+
+                        Surface(
+                            shape = MaterialTheme.shapes.extraSmall,
+                            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Text(
+                                text = technicalInfo,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        val displayTitle = if (!mediaMetadata?.title.isNullOrEmpty()) {
+                            mediaMetadata?.title.toString()
+                        } else {
+                            station.name
+                        }
+                        
                         Text(
-                            text = station.name,
+                            text = displayTitle,
                             style = MaterialTheme.typography.displayMedium,
                             color = Color.White,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Bold
                         )
+                        
+                        if (!mediaMetadata?.artist.isNullOrEmpty()) {
+                            Text(
+                                text = mediaMetadata?.artist.toString(),
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = Color.Gray,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                         
                         val timeMinutes = (playbackTime / 1000) / 60
                         val timeSeconds = (playbackTime / 1000) % 60
@@ -1431,7 +1877,8 @@ fun Screensaver(viewModel: MainViewModel) {
                         Text(
                             text = if (isPlaying) "Playing • $timeStr" else "Paused • $timeStr",
                             style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 8.dp)
                         )
                         
                         Spacer(modifier = Modifier.height(24.dp))
@@ -1454,12 +1901,183 @@ fun Screensaver(viewModel: MainViewModel) {
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
+fun FilePicker(
+    state: MainViewModel.FilePickerState,
+    onNavigate: (java.io.File) -> Unit,
+    onNavigateUp: () -> Unit,
+    onSelected: (java.io.File) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val folderIconColor = Color(0xFFFFCA28)
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .fillMaxHeight(0.85f),
+            shape = MaterialTheme.shapes.large,
+            colors = SurfaceDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            border = androidx.tv.material3.Border(
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                shape = MaterialTheme.shapes.large
+            )
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    Icon(
+                        if (state.isExport) Icons.Default.CreateNewFolder else Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = if (state.isExport) "Backup Favourites" else "Restore Favourites",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+                
+                Surface(
+                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(14.dp), tint = folderIconColor)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = state.currentPath, 
+                            style = MaterialTheme.typography.labelMedium, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    item {
+                        ListItem(
+                            selected = false,
+                            onClick = onNavigateUp,
+                            headlineContent = { Text("..", fontWeight = FontWeight.Bold) },
+                            supportingContent = { Text("Go to Parent Directory") },
+                            leadingContent = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = folderIconColor) }
+                        )
+                    }
+                    
+                    items(state.files) { file ->
+                        val isPlaylist = file.name.lowercase().let { 
+                            it.endsWith(".m3u") || it.endsWith(".m3u8") || it.endsWith(".pls") || it.endsWith(".txt")
+                        }
+                        
+                        ListItem(
+                            selected = false,
+                            onClick = {
+                                if (file.isDirectory) {
+                                    onNavigate(file)
+                                } else {
+                                    onSelected(file)
+                                }
+                            },
+                            enabled = true,
+                            headlineContent = { 
+                                Text(
+                                    file.name,
+                                    fontWeight = if (file.isDirectory) FontWeight.Bold else FontWeight.Normal
+                                ) 
+                            },
+                            leadingContent = {
+                                Icon(
+                                    if (file.isDirectory) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = null,
+                                    tint = if (file.isDirectory) folderIconColor 
+                                           else if (isPlaylist) MaterialTheme.colorScheme.primary
+                                           else Color.Gray
+                                )
+                            },
+                            supportingContent = {
+                                if (file.isDirectory) {
+                                    Text("Folder", style = MaterialTheme.typography.labelSmall)
+                                } else {
+                                    val size = file.length()
+                                    val sizeStr = if (size > 1024 * 1024) "${size / (1024 * 1024)} MB" else "${size / 1024} KB"
+                                    Text(sizeStr, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        )
+                    }
+                }
+                
+                if (state.isExport) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Surface(
+                        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)),
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Export filename:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = state.suggestedFileName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Button(
+                                onClick = { onSelected(java.io.File(state.currentPath)) },
+                                colors = androidx.tv.material3.ButtonDefaults.colors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Text("SAVE HERE")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class, UnstableApi::class)
+@Composable
 fun NowPlayingBar(
     station: Station,
     isPlaying: Boolean,
     isFavorite: Boolean,
     playbackTime: Long,
     playbackDuration: Long,
+    mediaMetadata: androidx.media3.common.MediaMetadata?,
+    audioFormat: androidx.media3.common.Format?,
     onTogglePlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onNext: () -> Unit,
@@ -1468,7 +2086,7 @@ fun NowPlayingBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(110.dp),
+            .height(115.dp),
         colors = SurfaceDefaults.colors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)
         ),
@@ -1482,7 +2100,7 @@ fun NowPlayingBar(
         ) {
             // Left part: Station info, bitrate, flag
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1.2f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -1501,52 +2119,87 @@ fun NowPlayingBar(
                 Spacer(modifier = Modifier.width(16.dp))
 
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = station.name, 
-                            style = MaterialTheme.typography.titleLarge, 
-                            maxLines = 1, 
-                            overflow = TextOverflow.Ellipsis,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = MaterialTheme.shapes.extraSmall,
-                            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                        ) {
-                            Text(
-                                text = "${station.bitrate}k",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                            )
+                    // Technical decoder info
+                    val technicalInfo = audioFormat?.let { format ->
+                        val kbps = if (format.bitrate > 0) "${format.bitrate / 1000}k" else "${station.bitrate}k"
+                        val samplerate = if (format.sampleRate > 0) "${format.sampleRate / 1000}kHz" else ""
+                        val codec = format.sampleMimeType?.removePrefix("audio/")?.uppercase()
+                            ?.replace("MPEG", "MP3")
+                            ?.replace("MP4A-LATM", "AAC")
+                            ?: station.codec.orEmpty().uppercase()
+
+                        val channels = when (format.channelCount) {
+                            1 -> "Mono"
+                            2 -> "Stereo"
+                            in 3..8 -> "${format.channelCount}ch"
+                            else -> ""
                         }
+                        listOfNotNull(codec, kbps, samplerate, channels).joinToString(" ")
+                    } ?: "${station.bitrate}k"
+
+                    Surface(
+                        shape = MaterialTheme.shapes.extraSmall,
+                        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Text(
+                            text = technicalInfo,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
                     }
+
+                    val displayTitle = if (!mediaMetadata?.title.isNullOrEmpty()) {
+                        mediaMetadata?.title.toString()
+                    } else {
+                        station.name
+                    }
+                    val displaySubtitle = if (!mediaMetadata?.artist.isNullOrEmpty()) {
+                        mediaMetadata?.artist.toString()
+                    } else {
+                        station.country
+                    }
+
+                    Text(
+                        text = displayTitle, 
+                        style = MaterialTheme.typography.titleLarge, 
+                        maxLines = 1, 
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.Bold
+                    )
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val code = station.countryCode?.trim()?.lowercase()
-                        if (!code.isNullOrEmpty() && code.length == 2) {
-                            AsyncImage(
-                                model = "https://flagcdn.com/w40/$code.png",
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
-                                contentScale = ContentScale.Fit
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Public,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            )
+                        if (mediaMetadata?.artist.isNullOrEmpty()) {
+                            val code = station.countryCode?.trim()?.lowercase()
+                            if (!code.isNullOrEmpty() && code.length == 2) {
+                                AsyncImage(
+                                    model = "https://flagcdn.com/w40/$code.png",
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).padding(end = 8.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
                         }
 
                         Text(
-                            text = station.country, 
+                            text = displaySubtitle, 
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        
+                        if (!mediaMetadata?.title.isNullOrEmpty()) {
+                            Text(
+                                text = " • ${station.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

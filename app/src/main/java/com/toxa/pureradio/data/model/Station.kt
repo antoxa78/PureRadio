@@ -12,6 +12,6 @@ data class Station(
     @SerializedName("countrycode") val countryCode: String? = null,
     @SerializedName("language") val language: String,
     @SerializedName("votes") val votes: Int,
-    @SerializedName("codec") val codec: String,
+    @SerializedName("codec") val codec: String? = "",
     @SerializedName("bitrate") val bitrate: Int
 )

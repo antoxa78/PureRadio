@@ -6,25 +6,23 @@
 
     <!-- Background -->
     <path
-        android:fillColor="#121212"
+        android:fillColor="#1A1614"
         android:pathData="M0,0h320v180h-320z"/>
 
-    <!-- Decorative background element -->
+    <!-- Decorative Wood Panel Side -->
     <path
-        android:fillColor="#1E1E1E"
-        android:pathData="M0,0 L320,0 L320,180 Z"/>
+        android:fillColor="#3E2723"
+        android:pathData="M0,0h40v180h-40z"/>
+    <path
+        android:fillColor="#3E2723"
+        android:pathData="M280,0h40v180h-40z"/>
 
     <!-- Radio Logo Scaled and Centered -->
-    <!-- Original viewport was 24x24. We want to scale it to fit nicely in 180 height. -->
-    <!-- Let's say we want it to be 120x120 centered. -->
-    <!-- scale factor = 120 / 24 = 5 -->
-    <!-- offset to center: x = (320 - 120) / 2 = 100, y = (180 - 120) / 2 = 30 -->
-
     <group
-        android:translateX="100"
-        android:translateY="30"
-        android:scaleX="5.0"
-        android:scaleY="5.0">
+        android:translateX="115"
+        android:translateY="45"
+        android:scaleX="3.75"
+        android:scaleY="3.75">
         <!-- Wood Body -->
         <path
             android:fillColor="#5D4037"
@@ -66,7 +64,8 @@
             android:pathData="M4,20h2v1h-2zM18,20h2v1h-2z"/>
     </group>
 
-    <!-- Text "PURE RADIO" -->
-    <!-- Placeholder for text since vector doesn't support text easily without paths -->
-    <!-- I'll omit text for now as it's complex to path, or just assume the logo is enough for now -->
+    <!-- Subtle Golden Accent -->
+    <path
+        android:fillColor="#FBC02D"
+        android:pathData="M40,170h240v1h-240z"/>
 </vector>
