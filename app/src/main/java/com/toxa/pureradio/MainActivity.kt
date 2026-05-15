@@ -5,6 +5,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -18,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +37,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -70,6 +80,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -120,9 +133,29 @@ class MainActivity : ComponentActivity() {
                             viewModel.resetScreensaverTimer()
                             false
                         },
-                    shape = RectangleShape
+                    shape = RectangleShape,
+                    colors = SurfaceDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.background
+                    )
                 ) {
-                    MainScreen(viewModel)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        // Subtle background gradient
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.radialGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                            MaterialTheme.colorScheme.background
+                                        ),
+                                        center = androidx.compose.ui.geometry.Offset(x = 1000f, y = 0f),
+                                        radius = 2000f
+                                    )
+                                )
+                        )
+                        MainScreen(viewModel)
+                    }
                 }
             }
         }
@@ -138,7 +171,6 @@ fun MainScreen(viewModel: MainViewModel) {
     val genreGroups by viewModel.genreGroups.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val countries by viewModel.countries.collectAsState()
-    val countryGroups by viewModel.countryGroups.collectAsState()
     val currentStation by viewModel.currentStation.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -150,6 +182,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val favorites by viewModel.favorites.collectAsState()
     val playbackTime by viewModel.playbackTime.collectAsState()
     val isScreensaverShowing by viewModel.isScreensaverShowing.collectAsState()
+    val visibleGenres by viewModel.visibleGenres.collectAsState()
 
     var stationToFavorite by remember { mutableStateOf<Station?>(null) }
     var isDialogReady by remember { mutableStateOf(false) }
@@ -196,7 +229,7 @@ fun MainScreen(viewModel: MainViewModel) {
         NavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
-                Column(
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxHeight()
                         .padding(vertical = 16.dp, horizontal = 4.dp)
@@ -208,7 +241,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
                 ) {
-                    NavigationItem.entries.forEach { item ->
+                    items(NavigationItem.entries) { item ->
                         NavigationDrawerItem(
                             selected = selectedNavItem == item,
                             onClick = { 
@@ -219,6 +252,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             leadingContent = {
                                 val icon = when (item) {
                                     NavigationItem.Home -> Icons.Default.Home
+                                    NavigationItem.Popular -> Icons.Default.Mic
                                     NavigationItem.Recent -> Icons.Default.History
                                     NavigationItem.Search -> Icons.Default.Search
                                     NavigationItem.Genres -> Icons.AutoMirrored.Filled.List
@@ -286,10 +320,17 @@ fun MainScreen(viewModel: MainViewModel) {
                         text = title,
                         style = MaterialTheme.typography.headlineLarge,
                         fontWeight = if (isDeepDive) FontWeight.ExtraBold else FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
 
-                    if (selectedNavItem != NavigationItem.Settings) {
+                val showBitrateFilters = (selectedNavItem == NavigationItem.Home && selectedTag == null) ||
+                                        (selectedNavItem == NavigationItem.Popular) ||
+                                        (selectedNavItem == NavigationItem.Genres && selectedTag != null) ||
+                                        (selectedNavItem == NavigationItem.Countries && selectedCountry != null)
+
+                    if (showBitrateFilters) {
                         BitrateFilters(
                             selectedBitrates = selectedBitrates,
                             onToggleFilter = { viewModel.toggleBitrateFilter(it) }
@@ -303,7 +344,6 @@ fun MainScreen(viewModel: MainViewModel) {
                     } else {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
-                                val visibleGenres by viewModel.visibleGenres.collectAsState()
                                 val homeGroups = if (visibleGenres.isEmpty()) genreGroups else genreGroups.filter { visibleGenres.contains(it.genreName) }
                                 
                                 if (homeGroups.isNotEmpty()) {
@@ -318,6 +358,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                     StationGrid(stations, viewModel) { stationToFavorite = it }
                                 }
                             }
+                            NavigationItem.Popular -> {
+                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                            }
                             NavigationItem.Recent -> {
                                 StationGrid(stations, viewModel) { stationToFavorite = it }
                             }
@@ -329,14 +372,14 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                             NavigationItem.Genres -> {
                                 if (selectedTag == null) {
-                                    TagGrid(tags, viewModel) { viewModel.selectTag(it) }
+                                    TagGrid(tags) { viewModel.selectTag(it) }
                                 } else {
                                     StationGrid(stations, viewModel) { stationToFavorite = it }
                                 }
                             }
                             NavigationItem.Countries -> {
                                 if (selectedCountry == null) {
-                                    CountryGrid(countries, countryGroups) { viewModel.selectCountry(it) }
+                                    CountryGrid(countries) { viewModel.selectCountry(it) }
                                 } else {
                                     StationGrid(stations, viewModel) { stationToFavorite = it }
                                 }
@@ -353,7 +396,18 @@ fun MainScreen(viewModel: MainViewModel) {
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "Loading...", style = MaterialTheme.typography.headlineMedium)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                LinearProgressIndicator(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Searching for waves...", 
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                )
+                            }
                         }
                     }
                 }
@@ -481,6 +535,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val autoUpdateInterval by viewModel.autoUpdateInterval.collectAsState()
     val screensaverEnabled by viewModel.screensaverEnabled.collectAsState()
     val screensaverTimeout by viewModel.screensaverTimeout.collectAsState()
+    val screensaverMode by viewModel.screensaverMode.collectAsState()
+    val audioPassthrough by viewModel.audioPassthrough.collectAsState()
 
     val subMenuFocusRequester = remember { FocusRequester() }
     val mainMenuFocusRequester = remember { FocusRequester() }
@@ -495,7 +551,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
     when (settingsSubMenu) {
         "HomeGenres" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -505,9 +561,9 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Home Genres Menu", style = MaterialTheme.typography.headlineLarge)
+                        Text("Personalize Home Tab", style = MaterialTheme.typography.headlineMedium)
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
                 items(tags) { tag ->
                     ListItem(
@@ -524,7 +580,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         "AutoUpdate" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -534,12 +590,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Auto Update Database", style = MaterialTheme.typography.headlineLarge)
+                        Text("Database Update Interval", style = MaterialTheme.typography.headlineMedium)
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
                 val options = listOf(
-                    0 to "Off",
+                    0 to "Manual Only (Off)",
                     12 to "Every 12 Hours",
                     24 to "Every 24 Hours"
                 )
@@ -553,7 +609,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         headlineContent = { Text(label) },
                         trailingContent = {
                             if (autoUpdateInterval == hours) {
-                                Icon(Icons.Default.History, contentDescription = null)
+                                Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     )
@@ -561,7 +617,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         "Screensaver" -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
@@ -571,20 +627,42 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Screensaver Settings", style = MaterialTheme.typography.headlineLarge)
+                        Text("Screensaver Preferences", style = MaterialTheme.typography.headlineMedium)
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
                 item {
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleScreensaver(!screensaverEnabled) },
-                        headlineContent = { Text("Enable Screensaver") },
-                        supportingContent = { Text("Show screensaver when playback is active") },
+                        headlineContent = { Text("Activate Screensaver") },
+                        supportingContent = { Text("Automatically engage when music is playing") },
                         trailingContent = {
                             Switch(checked = screensaverEnabled, onCheckedChange = null)
                         }
                     )
+                }
+                item {
+                    Text("Display Mode", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                }
+                val modes = listOf(
+                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.StationInfo to "Retro Station Info",
+                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.BlackScreen to "Deep Black (OLED Safe)"
+                )
+                items(modes) { (mode, label) ->
+                    ListItem(
+                        selected = screensaverMode == mode,
+                        onClick = { viewModel.setScreensaverMode(mode) },
+                        headlineContent = { Text(label) },
+                        trailingContent = {
+                            if (screensaverMode == mode) {
+                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    )
+                }
+                item {
+                    Text("Idle Timeout", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
                 }
                 val timeouts = listOf(1, 5, 10, 20, 30)
                 items(timeouts) { minutes ->
@@ -594,10 +672,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             viewModel.setScreensaverTimeout(minutes)
                             viewModel.setSettingsSubMenu(null)
                         },
-                        headlineContent = { Text("Timeout: $minutes minutes") },
+                        headlineContent = { Text("$minutes Minutes") },
                         trailingContent = {
                             if (screensaverTimeout == minutes) {
-                                Icon(Icons.Default.History, contentDescription = null)
+                                Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     )
@@ -605,36 +683,21 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         else -> {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 32.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
                 item {
-                    Text("Settings", style = MaterialTheme.typography.headlineLarge)
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("System Settings", style = MaterialTheme.typography.headlineLarge)
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
 
                 item {
+                    Text("INTERFACE & CONTENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
                         modifier = Modifier.focusRequester(mainMenuFocusRequester),
-                        headlineContent = { Text("Home Genres Menu") },
-                        supportingContent = { Text("Select genres to display on the Home tab.") },
-                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
-                    )
-                }
-
-                item {
-                    ListItem(
-                        selected = false,
-                        onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
-                        headlineContent = { Text("Auto Update Database") },
-                        supportingContent = { 
-                            val label = when(autoUpdateInterval) {
-                                12 -> "Every 12 Hours"
-                                24 -> "Every 24 Hours"
-                                else -> "Off"
-                            }
-                            Text("Current interval: $label") 
-                        },
+                        headlineContent = { Text("Home Screen Curation") },
+                        supportingContent = { Text("Choose which genres appear on your primary dashboard") },
+                        leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
                 }
@@ -643,21 +706,38 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("Screensaver") },
-                        headlineContent = { Text("Screensaver") },
+                        headlineContent = { Text("Ambient & Screensaver") },
                         supportingContent = {
-                            val label = if (screensaverEnabled) "On (${screensaverTimeout}m)" else "Off"
+                            val label = if (screensaverEnabled) "Enabled (${screensaverTimeout}m)" else "Disabled"
                             Text("Current status: $label")
                         },
+                        leadingContent = { Icon(Icons.Default.MusicVideo, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.toggleAudioPassthrough() },
+                        headlineContent = { Text("Audio Passthrough (Bit-Perfect)") },
+                        supportingContent = { Text("Experimental: Bypass Android resampler. Note: Ensure 'Match content sample rate' is ON in Shield settings.") },
+                        leadingContent = { Icon(Icons.Default.MusicNote, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = audioPassthrough, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    Text("STATION DATABASE", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.toggleHideBroken() },
-                        headlineContent = { Text("Hide broken stations") },
-                        supportingContent = { Text("Filter out stations that are currently not working.") },
+                        headlineContent = { Text("Smart Filter") },
+                        supportingContent = { Text("Automatically hide stations with reported connection issues") },
+                        leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = hideBroken, onCheckedChange = null)
                         }
@@ -667,35 +747,81 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 item {
                     ListItem(
                         selected = false,
-                        onClick = { viewModel.updateDatabase() },
-                        headlineContent = { Text("Update stations database") },
-                        supportingContent = {
-                            val dateStr = if (lastUpdate > 0) {
-                                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lastUpdate))
-                            } else "Never"
-                            Text("Last update: $dateStr. Total stations: ${serverStats?.stations ?: "..."}")
+                        onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
+                        headlineContent = { Text("Background Synchronization") },
+                        supportingContent = { 
+                            val label = when(autoUpdateInterval) {
+                                12 -> "12 Hours"
+                                24 -> "24 Hours"
+                                else -> "Disabled"
+                            }
+                            Text("Update frequency: $label") 
                         },
-                        trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
+                        leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(24.dp))
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.updateDatabase() },
+                        headlineContent = { Text("Force Database Refresh") },
+                        supportingContent = {
+                            val dateStr = if (lastUpdate > 0) {
+                                SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastUpdate))
+                            } else "Never"
+                            Text("Last synced: $dateStr • ${serverStats?.stations ?: "..."} Stations available")
+                        },
+                        leadingContent = { Icon(Icons.Default.Radio, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Surface(
                             colors = SurfaceDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
                             ),
-                            shape = MaterialTheme.shapes.medium
+                            shape = MaterialTheme.shapes.medium,
+                            border = androidx.tv.material3.Border(
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                shape = MaterialTheme.shapes.medium
+                            )
                         ) {
-                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Pure Radio TV", style = MaterialTheme.typography.titleMedium)
-                                val buildDate = "2025-01-24"
-                                val buildTime = "19:45"
-                                Text("Build: $buildDate $buildTime", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Column(
+                                modifier = Modifier.padding(32.dp), 
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Default.Radio, 
+                                    contentDescription = null, 
+                                    modifier = Modifier.size(56.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    "PURE RADIO TV", 
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "A Premium Retro Experience", 
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    "Build: 2025-01-30 14:30",
+                                    style = MaterialTheme.typography.labelSmall, 
+                                    color = Color.Gray
+                                )
                             }
                         }
                     }
@@ -755,7 +881,7 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) 
 @Composable
 fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(groups) {
+    LaunchedEffect(groups.isEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
@@ -786,7 +912,14 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, modifier: Modifier = 
         onClick = onClick,
         modifier = modifier
             .padding(8.dp)
-            .height(180.dp)
+            .height(180.dp),
+        scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f),
+        glow = androidx.tv.material3.CardDefaults.glow(
+            focusedGlow = androidx.tv.material3.Glow(
+                elevationColor = getGenreColor(group.genreName).copy(alpha = 0.5f),
+                elevation = 12.dp
+            )
+        )
     ) {
         Box(modifier = Modifier.fillMaxSize().background(getGenreColor(group.genreName))) {
             AsyncImage(
@@ -794,7 +927,16 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, modifier: Modifier = 
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                alpha = 0.6f
+                alpha = 0.4f
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                        )
+                    )
             )
             Column(
                 modifier = Modifier
@@ -803,23 +945,30 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, modifier: Modifier = 
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = group.genreName, 
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
+                Spacer(modifier = Modifier.height(4.dp))
                 val countText = if (group.filteredCount < group.stations.size) {
-                    "${group.filteredCount} filtered stations"
+                    "${group.filteredCount} / ${group.totalStations}"
                 } else {
                     "${group.totalStations} stations"
                 }
-                Text(
-                    text = countText, 
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.8f)
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.extraSmall,
+                    colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        text = countText, 
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }
@@ -896,9 +1045,10 @@ fun StationGrid(
     onLongClick: (Station) -> Unit = {}
 ) {
     val favorites by viewModel.favorites.collectAsState()
+    val currentStation by viewModel.currentStation.collectAsState()
     val focusRequester = remember { FocusRequester() }
     
-    LaunchedEffect(stations) {
+    LaunchedEffect(stations.isEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
@@ -916,6 +1066,7 @@ fun StationGrid(
                 StationCard(
                     station = station,
                     isFavorite = favorites.contains(station.stationUuid),
+                    isCurrent = currentStation?.stationUuid == station.stationUuid,
                     onClick = { viewModel.playStation(station) },
                     onLongClick = { onLongClick(station) },
                     modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
@@ -927,10 +1078,9 @@ fun StationGrid(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit) {
-    val genreGroups by viewModel.genreGroups.collectAsState()
+fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(tags) {
+    LaunchedEffect(tags.isEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
@@ -949,7 +1099,8 @@ fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                    scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f)
                 ) {
                     Box(modifier = Modifier.fillMaxSize().background(getGenreColor(tag.name))) {
                         AsyncImage(
@@ -957,7 +1108,16 @@ fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
-                            alpha = 0.6f
+                            alpha = 0.4f
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                    )
+                                )
                         )
                         Column(
                             modifier = Modifier
@@ -966,26 +1126,27 @@ fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }, 
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
-                            val group = genreGroups.find { it.genreName == tag.name }
-                            val countText = if (group != null && group.filteredCount < group.stations.size) {
-                                "${group.filteredCount} filtered stations"
-                            } else {
-                                "${tag.stationcount} stations"
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                shape = MaterialTheme.shapes.extraSmall,
+                                colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
+                            ) {
+                                Text(
+                                    text = "${tag.stationcount} stations",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
-                            Text(
-                                text = countText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
                         }
                     }
                 }
@@ -998,12 +1159,11 @@ fun TagGrid(tags: List<Tag>, viewModel: MainViewModel, autoFocus: Boolean = true
 @Composable
 fun CountryGrid(
     countries: List<Country>, 
-    countryGroups: List<GenreGroup>, 
     autoFocus: Boolean = true, 
     onCountryClick: (Country) -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(countries) {
+    LaunchedEffect(countries.isEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
@@ -1022,15 +1182,27 @@ fun CountryGrid(
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                    scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f)
                 ) {
                     Box(modifier = Modifier.fillMaxSize().background(getGenreColor(country.name))) {
+                        val flagCode = country.iso_3166_1.lowercase().trim()
                         AsyncImage(
-                            model = "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop", // Travel/World image
+                            model = if (flagCode.isNotEmpty()) "https://flagcdn.com/w160/$flagCode.png" else "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop",
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
-                            alpha = 0.6f
+                            alpha = 0.35f,
+                            error = coil.compose.rememberAsyncImagePainter("https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop")
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                    )
+                                )
                         )
                         Column(
                             modifier = Modifier
@@ -1039,26 +1211,27 @@ fun CountryGrid(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = country.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
-                            val group = countryGroups.find { it.genreName == country.name }
-                            val countText = if (group != null && group.filteredCount < group.stations.size) {
-                                "${group.filteredCount} filtered stations"
-                            } else {
-                                "${country.stationcount} stations"
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                shape = MaterialTheme.shapes.extraSmall,
+                                colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
+                            ) {
+                                Text(
+                                    text = "${country.stationcount} stations",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
-                            Text(
-                                text = countText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
                         }
                     }
                 }
@@ -1072,6 +1245,7 @@ fun CountryGrid(
 fun StationCard(
     station: Station,
     isFavorite: Boolean,
+    isCurrent: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
@@ -1081,39 +1255,91 @@ fun StationCard(
         onLongClick = onLongClick,
         modifier = modifier
             .padding(8.dp)
-            .height(160.dp)
+            .height(180.dp),
+        scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f),
+        border = androidx.tv.material3.CardDefaults.border(
+            focusedBorder = androidx.tv.material3.Border(
+                border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                shape = MaterialTheme.shapes.medium
+            )
+        ),
+        colors = androidx.tv.material3.CardDefaults.colors(
+            containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier.padding(12.dp).fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Box {
-                AsyncImage(
-                    model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .padding(8.dp),
-                    contentScale = ContentScale.Fit,
-                    error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
-                    placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
-                )
+            Box(contentAlignment = Alignment.Center) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(90.dp),
+                    colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.05f))
+                ) {
+                    AsyncImage(
+                        model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        contentScale = ContentScale.Fit,
+                        error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
+                        placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                    )
+                }
+                val code = station.countryCode?.trim()?.lowercase()
+                if (!code.isNullOrEmpty() && code.length == 2) {
+                    AsyncImage(
+                        model = "https://flagcdn.com/w40/$code.png",
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp).align(Alignment.TopStart).padding(4.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                }
                 if (isFavorite) {
                     Icon(
                         Icons.Default.Favorite,
                         contentDescription = null,
-                        modifier = Modifier.size(24.dp).align(Alignment.TopEnd),
+                        modifier = Modifier.size(20.dp).align(Alignment.TopEnd).padding(4.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (isCurrent) {
+                    Icon(
+                        Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp).align(Alignment.BottomEnd).padding(4.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            
             Text(
                 text = station.name,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Favorite,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = station.votes.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
         }
     }
 }
@@ -1122,7 +1348,32 @@ fun StationCard(
 @Composable
 fun Screensaver(viewModel: MainViewModel) {
     val currentStation by viewModel.currentStation.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val playbackTime by viewModel.playbackTime.collectAsState()
+    val screensaverMode by viewModel.screensaverMode.collectAsState()
     val focusRequester = remember { FocusRequester() }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "BouncingTransition")
+    
+    val xOffset by infiniteTransition.animateFloat(
+        initialValue = -0.2f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 15000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "xOffset"
+    )
+    
+    val yOffset by infiniteTransition.animateFloat(
+        initialValue = -0.2f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 11000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "yOffset"
+    )
 
     LaunchedEffect(Unit) {
         try { focusRequester.requestFocus() } catch (_: Exception) {}
@@ -1139,34 +1390,62 @@ fun Screensaver(viewModel: MainViewModel) {
             },
         colors = SurfaceDefaults.colors(containerColor = Color.Black)
     ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                currentStation?.let { station ->
-                    AsyncImage(
-                        model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
-                        contentDescription = null,
-                        modifier = Modifier.size(200.dp),
-                        contentScale = ContentScale.Fit,
-                        error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
-                        placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = station.name,
-                        style = MaterialTheme.typography.displayMedium,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Playing...",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+        if (screensaverMode == com.toxa.pureradio.ui.viewmodel.ScreensaverMode.StationInfo) {
+            Box(
+                modifier = Modifier.fillMaxSize(), 
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .align(Alignment.Center)
+                        .offset(
+                            x = (xOffset * 500).dp,
+                            y = (yOffset * 300).dp
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    currentStation?.let { station ->
+                        AsyncImage(
+                            model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                            contentDescription = null,
+                            modifier = Modifier.size(240.dp),
+                            contentScale = ContentScale.Fit,
+                            error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
+                            placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Text(
+                            text = station.name,
+                            style = MaterialTheme.typography.displayMedium,
+                            color = Color.White,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        
+                        val timeMinutes = (playbackTime / 1000) / 60
+                        val timeSeconds = (playbackTime / 1000) % 60
+                        val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
+                        
+                        Text(
+                            text = if (isPlaying) "Playing • $timeStr" else "Paused • $timeStr",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        WaveformAnalyzer(isPlaying = isPlaying)
+                    }
                 }
-                Spacer(modifier = Modifier.height(48.dp))
+                
                 Text(
                     text = "Press any key to return",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.Gray
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 32.dp)
                 )
             }
         }
@@ -1189,87 +1468,220 @@ fun NowPlayingBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(80.dp),
-        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .height(110.dp),
+        colors = SurfaceDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)
+        ),
+        shape = RectangleShape
     ) {
         Row(
             modifier = Modifier
-                .padding(horizontal = 32.dp)
+                .padding(horizontal = 24.dp)
                 .fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
-                contentDescription = null,
-                modifier = Modifier.size(50.dp),
-                contentScale = ContentScale.Fit,
-                error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo),
-                placeholder = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
-            )
-            
-            Spacer(modifier = Modifier.width(16.dp))
+            // Left part: Station info, bitrate, flag
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(60.dp),
+                    colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.1f))
+                ) {
+                    AsyncImage(
+                        model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        contentScale = ContentScale.Fit,
+                        error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Card(onClick = onPrevious, modifier = Modifier.padding(horizontal = 2.dp)) {
-                        Icon(
-                            Icons.Default.SkipPrevious,
-                            contentDescription = "Previous",
-                            modifier = Modifier.padding(6.dp).size(20.dp)
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = station.name, 
+                            style = MaterialTheme.typography.titleLarge, 
+                            maxLines = 1, 
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = MaterialTheme.shapes.extraSmall,
+                            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        ) {
+                            Text(
+                                text = "${station.bitrate}k",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
                     }
-                    Card(onClick = onTogglePlay, modifier = Modifier.padding(horizontal = 2.dp)) {
-                        Icon(
-                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            modifier = Modifier.padding(6.dp).size(20.dp)
-                        )
-                    }
-                    Card(onClick = onNext, modifier = Modifier.padding(horizontal = 2.dp)) {
-                        Icon(
-                            Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            modifier = Modifier.padding(6.dp).size(20.dp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val code = station.countryCode?.trim()?.lowercase()
+                        if (!code.isNullOrEmpty() && code.length == 2) {
+                            AsyncImage(
+                                model = "https://flagcdn.com/w40/$code.png",
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Public,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp).padding(end = 8.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            )
+                        }
+
+                        Text(
+                            text = station.country, 
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
                     }
                 }
-                Text(text = "${station.bitrate} kbps", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            // Center part: Controls
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val timeMinutes = (playbackTime / 1000) / 60
+                val timeSeconds = (playbackTime / 1000) % 60
+                val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
+                
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(end = 16.dp)
+                )
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = station.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = station.country, style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    val timeMinutes = (playbackTime / 1000) / 60
-                    val timeSeconds = (playbackTime / 1000) % 60
-                    val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
-                    
-                    val durationStr = if (playbackDuration > 0) {
-                        val durMinutes = (playbackDuration / 1000) / 60
-                        val durSeconds = (playbackDuration / 1000) % 60
-                        " / " + String.format(Locale.getDefault(), "%02d:%02d", durMinutes, durSeconds)
-                    } else ""
-
-                    Text(
-                        text = timeStr + durationStr,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                Card(onClick = onPrevious, modifier = Modifier.padding(horizontal = 4.dp)) {
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        contentDescription = "Previous",
+                        modifier = Modifier.padding(10.dp).size(24.dp)
+                    )
+                }
+                Card(
+                    onClick = onTogglePlay, 
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    colors = androidx.tv.material3.CardDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        modifier = Modifier.padding(12.dp).size(28.dp)
+                    )
+                }
+                Card(onClick = onNext, modifier = Modifier.padding(horizontal = 4.dp)) {
+                    Icon(
+                        Icons.Default.SkipNext,
+                        contentDescription = "Next",
+                        modifier = Modifier.padding(10.dp).size(24.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                Card(
+                    onClick = onToggleFavorite, 
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Icon(
+                        if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        modifier = Modifier.padding(10.dp).size(24.dp),
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
-            
-            Card(onClick = onToggleFavorite, modifier = Modifier.padding(horizontal = 4.dp)) {
-                Icon(
-                    if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    modifier = Modifier.padding(8.dp).size(20.dp),
-                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+
+            // Right part: Waveform
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                WaveformAnalyzer(isPlaying = isPlaying)
             }
+        }
+
+        if (playbackDuration > 0) {
+            LinearProgressIndicator(
+                progress = { playbackTime.toFloat() / playbackDuration.toFloat() },
+                modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent
+            )
+        }
+    }
+}
+
+@Composable
+fun WaveformAnalyzer(isPlaying: Boolean, modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "WaveformTransition")
+    val barCount = 40
+    
+    Row(
+        modifier = modifier
+            .width(220.dp)
+            .height(50.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(barCount) { i ->
+            val distanceFromCenter = Math.abs(i - barCount / 2).toFloat()
+            val centerWeight = 1f - (distanceFromCenter / (barCount / 2))
+            
+            val duration = remember { (500..1200).random() }
+            val delay = remember { (i * 35) % 800 }
+            
+            val heightScale by infiniteTransition.animateFloat(
+                initialValue = 0.1f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(duration, delay, easing = FastOutLinearInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "WaveHeight_$i"
+            )
+            
+            val finalHeight = if (isPlaying) {
+                (0.1f + 0.9f * heightScale) * (0.2f + 0.8f * centerWeight)
+            } else {
+                0.05f
+            }
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(finalHeight)
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(1.dp)
+                    )
+            )
         }
     }
 }

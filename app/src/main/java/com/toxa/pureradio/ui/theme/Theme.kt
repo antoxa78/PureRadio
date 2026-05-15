@@ -7,16 +7,19 @@ import androidx.tv.material3.darkColorScheme
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 private val DarkColorScheme = darkColorScheme(
-    primary = BluePrimary,
-    secondary = BlueSecondary,
-    tertiary = BlueTertiary,
+    primary = RetroGold,
+    secondary = Amber,
+    tertiary = WoodBrown,
     background = Black,
     surface = DarkGrey,
-    onPrimary = White,
-    onSecondary = White,
-    onTertiary = Black,
+    surfaceVariant = SurfaceGrey,
+    onPrimary = Black,
+    onSecondary = Black,
+    onTertiary = White,
     onBackground = White,
     onSurface = White,
+    primaryContainer = DarkWood,
+    onPrimaryContainer = RetroGold
 )
 
 @OptIn(ExperimentalTvMaterial3Api::class)

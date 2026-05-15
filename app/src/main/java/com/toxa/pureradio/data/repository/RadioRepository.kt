@@ -15,9 +15,9 @@ class RadioRepository {
 
     private val service = retrofit.create(RadioBrowserService::class.java)
 
-    suspend fun getTopStations(hideBroken: Boolean = false): List<Station> {
+    suspend fun getTopStations(limit: Int = 100, hideBroken: Boolean = false): List<Station> {
         return try {
-            service.getTopStations(hideBroken = hideBroken)
+            service.getTopStations(limit = limit, hideBroken = hideBroken)
         } catch (e: Exception) {
             emptyList()
         }
@@ -73,6 +73,14 @@ class RadioRepository {
     suspend fun getCountries(): List<Country> {
         return try {
             service.getCountries()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun getStationsByUuid(uuids: String): List<Station> {
+        return try {
+            service.getStationsByUuid(uuids)
         } catch (e: Exception) {
             emptyList()
         }
