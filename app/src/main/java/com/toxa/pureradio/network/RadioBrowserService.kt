@@ -12,6 +12,7 @@ interface RadioBrowserService {
         @Query("language") language: String? = null,
         @Query("tag") tag: String? = null,
         @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int = 0,
         @Query("order") order: String = "votes",
         @Query("reverse") reverse: Boolean = true,
         @Query("hidebroken") hideBroken: Boolean = false
@@ -28,7 +29,7 @@ interface RadioBrowserService {
         @Query("hidebroken") hideBroken: Boolean = true,
         @Query("order") order: String = "stationcount",
         @Query("reverse") reverse: Boolean = true,
-        @Query("limit") limit: Int = 100
+        @Query("limit") limit: Int = 500
     ): List<Tag>
 
     @GET("json/countries")

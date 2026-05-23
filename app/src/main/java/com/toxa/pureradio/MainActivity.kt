@@ -47,7 +47,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
@@ -78,24 +77,32 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -144,7 +151,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            PureRadioTheme {
+            val isInitialized by viewModel.isInitialized.collectAsState()
+            var splashElapsed by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(3000)
+                splashElapsed = true
+            }
+            val showSplash by remember { derivedStateOf { !isInitialized || !splashElapsed } }
+            val appTheme by viewModel.appTheme.collectAsState()
+            PureRadioTheme(theme = appTheme) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
@@ -158,25 +173,115 @@ class MainActivity : ComponentActivity() {
                     )
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        // Subtle background gradient
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    androidx.compose.ui.graphics.Brush.radialGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                            MaterialTheme.colorScheme.background
-                                        ),
-                                        center = androidx.compose.ui.geometry.Offset(x = 1000f, y = 0f),
-                                        radius = 2000f
+                        if (showSplash) {
+                            SplashScreen()
+                        } else {
+                            // Subtle background gradient
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        androidx.compose.ui.graphics.Brush.radialGradient(
+                                            colors = listOf(
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                                MaterialTheme.colorScheme.background
+                                            ),
+                                            center = androidx.compose.ui.geometry.Offset(x = 1000f, y = 0f),
+                                            radius = 2000f
+                                        )
                                     )
-                                )
-                        )
-                        MainScreen(viewModel)
+                            )
+                            MainScreen(viewModel)
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun SplashScreen() {
+    val iconAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+    val iconScale = remember { androidx.compose.animation.core.Animatable(0.6f) }
+    val glowAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+    val titleOffset = remember { androidx.compose.animation.core.Animatable(40f) }
+    val titleAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+    val subAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseGlow = infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+        label = "pulse"
+    )
+
+    LaunchedEffect(Unit) {
+        iconAlpha.animateTo(1f, animationSpec = tween(400))
+        iconScale.animateTo(1f, animationSpec = tween(500, easing = FastOutLinearInEasing))
+        glowAlpha.animateTo(1f, animationSpec = tween(700))
+        titleOffset.animateTo(0f, animationSpec = tween(500, easing = FastOutLinearInEasing))
+        titleAlpha.animateTo(1f, animationSpec = tween(300))
+        delay(100)
+        subAlpha.animateTo(1f, animationSpec = tween(400))
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color(0xFF1a1a1a)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(220.dp)
+                        .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value }
+                        .background(
+                            androidx.compose.ui.graphics.Color(0xFFFBC02D).copy(alpha = 0.08f),
+                            CircleShape
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .size(160.dp)
+                        .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value * 0.5f }
+                        .background(
+                            androidx.compose.ui.graphics.Color(0xFFFBC02D).copy(alpha = 0.05f),
+                            CircleShape
+                        )
+                )
+                Icon(
+                    painter = androidx.compose.ui.res.painterResource(com.toxa.pureradio.R.drawable.ic_radio_logo),
+                    contentDescription = "Pure Radio",
+                    modifier = Modifier
+                        .size(130.dp)
+                        .graphicsLayer {
+                            alpha = iconAlpha.value
+                            scaleX = iconScale.value
+                            scaleY = iconScale.value
+                        },
+                    tint = androidx.compose.ui.graphics.Color.Unspecified
+                )
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+            Text(
+                text = "Pure Radio",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = androidx.compose.ui.graphics.Color(0xFFFBC02D),
+                modifier = Modifier.graphicsLayer {
+                    alpha = titleAlpha.value
+                    translationY = titleOffset.value
+                }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Thousands of stations, free",
+                style = MaterialTheme.typography.bodyMedium,
+                color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
+                modifier = Modifier.graphicsLayer { alpha = subAlpha.value }
+            )
         }
     }
 }
@@ -192,20 +297,28 @@ fun MainScreen(viewModel: MainViewModel) {
     val countries by viewModel.countries.collectAsState()
     val currentStation by viewModel.currentStation.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val isInitialized by viewModel.isInitialized.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val selectedTag by viewModel.selectedTag.collectAsState()
     val selectedCountry by viewModel.selectedCountry.collectAsState()
+    val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
     val selectedBitrates by viewModel.selectedBitrates.collectAsState()
+    val hasMoreStations by viewModel.hasMoreStations.collectAsState()
     val settingsSubMenu by viewModel.settingsSubMenu.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val playbackTime by viewModel.playbackTime.collectAsState()
     val isScreensaverShowing by viewModel.isScreensaverShowing.collectAsState()
     val visibleGenres by viewModel.visibleGenres.collectAsState()
+    val filteredTags by viewModel.filteredTags.collectAsState()
+    val tagSearchQuery by viewModel.tagSearchQuery.collectAsState()
+    val genreSortMode by viewModel.genreSortMode.collectAsState()
     val mediaMetadata by viewModel.mediaMetadata.collectAsState()
     val audioFormat by viewModel.audioFormat.collectAsState()
     val filePickerState by viewModel.filePickerState.collectAsState()
     val pendingImportStations by viewModel.pendingImportStations.collectAsState()
+    val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -256,6 +369,10 @@ fun MainScreen(viewModel: MainViewModel) {
 
     var stationToFavorite by remember { mutableStateOf<Station?>(null) }
     var isDialogReady by remember { mutableStateOf(false) }
+    var genreToAdd by remember { mutableStateOf<Tag?>(null) }
+    var genreToRemove by remember { mutableStateOf<String?>(null) }
+    var isGenreDialogReady by remember { mutableStateOf(false) }
+    var showExitDialog by remember { mutableStateOf(false) }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerFocusRequesters = remember { NavigationItem.entries.associateWith { FocusRequester() } }
@@ -263,10 +380,14 @@ fun MainScreen(viewModel: MainViewModel) {
     val cancelFocusRequester = remember { FocusRequester() }
 
     val isDrawerOpen = drawerState.currentValue == DrawerValue.Open
+    val drawerOpenedIntentionally = remember { mutableStateOf(false) }
     BackHandler {
         if (isDrawerOpen) {
-            // Exit only from the Main Menu (Drawer)
-            kotlin.system.exitProcess(0)
+            if (quitConfirmationEnabled) {
+                showExitDialog = true
+            } else {
+                kotlin.system.exitProcess(0)
+            }
         } else {
             when {
                 pendingImportStations != null -> viewModel.cancelRestore()
@@ -274,8 +395,11 @@ fun MainScreen(viewModel: MainViewModel) {
                 settingsSubMenu != null -> viewModel.setSettingsSubMenu(null)
                 selectedTag != null -> viewModel.selectTag(null)
                 selectedCountry != null -> viewModel.selectCountry(null)
-                else -> {
-                    // From any root section, return to the Main Menu (Navigation Drawer)
+                selectedSearchTag != null -> viewModel.selectSearchTag(null)
+                selectedNavItem == NavigationItem.Search && (searchQuery.isNotEmpty() || stations.isNotEmpty()) -> viewModel.clearSearch()
+                isInitialized -> {
+                    drawerOpenedIntentionally.value = true
+                    drawerState.setValue(DrawerValue.Open)
                     try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
                 }
             }
@@ -292,23 +416,38 @@ fun MainScreen(viewModel: MainViewModel) {
         if (stationToFavorite != null) {
             isDialogReady = false
             try { cancelFocusRequester.requestFocus() } catch (_: Exception) {}
-            // Wait for the user to release the remote button after long press
             delay(800)
             isDialogReady = true
+        }
+    }
+
+    LaunchedEffect(genreToAdd, genreToRemove) {
+        if (genreToAdd != null || genreToRemove != null) {
+            isGenreDialogReady = false
+            try { cancelFocusRequester.requestFocus() } catch (_: Exception) {}
+            delay(800)
+            isGenreDialogReady = true
+        }
+    }
+
+    // Clear drawerOpenedIntentionally after one frame if drawer didn't consume it
+    LaunchedEffect(drawerOpenedIntentionally.value) {
+        if (drawerOpenedIntentionally.value) {
+            withFrameNanos { }
+            drawerOpenedIntentionally.value = false
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavigationDrawer(
             drawerState = drawerState,
-            drawerContent = {
+            drawerContent = { drawerValue ->
+                val isDrawerCurrentlyOpen = drawerValue == DrawerValue.Open
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .onFocusChanged { 
-                            if (it.hasFocus) {
-                                drawerState.setValue(DrawerValue.Open)
-                            } else {
+                        .onFocusChanged {
+                            if (!it.hasFocus && drawerValue == DrawerValue.Open) {
                                 drawerState.setValue(DrawerValue.Closed)
                             }
                         },
@@ -318,10 +457,21 @@ fun MainScreen(viewModel: MainViewModel) {
                         NavigationDrawerItem(
                             selected = selectedNavItem == item,
                             onClick = { 
-                                viewModel.selectNavigationItem(item)
-                                drawerState.setValue(DrawerValue.Closed)
+                                if (item == NavigationItem.Exit) {
+                                    drawerState.setValue(DrawerValue.Closed)
+                                    showExitDialog = true
+                                } else {
+                                    viewModel.selectNavigationItem(item)
+                                    drawerState.setValue(DrawerValue.Closed)
+                                }
                             },
-                            modifier = Modifier.focusRequester(drawerFocusRequesters[item]!!),
+                            colors = androidx.tv.material3.NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier
+                                .focusProperties { canFocus = isDrawerCurrentlyOpen }
+                                .then(if (isDrawerCurrentlyOpen) Modifier.focusRequester(drawerFocusRequesters[item]!!) else Modifier),
                             leadingContent = {
                                 val icon = when (item) {
                                     NavigationItem.Home -> Icons.Default.Home
@@ -397,10 +547,10 @@ fun MainScreen(viewModel: MainViewModel) {
                         overflow = TextOverflow.Ellipsis
                     )
 
-                val showBitrateFilters = (selectedNavItem == NavigationItem.Home && selectedTag == null) ||
+                val showBitrateFilters = (selectedNavItem == NavigationItem.Home) ||
                                         (selectedNavItem == NavigationItem.Popular) ||
-                                        (selectedNavItem == NavigationItem.Genres && selectedTag != null) ||
-                                        (selectedNavItem == NavigationItem.Countries && selectedCountry != null)
+                                        (selectedNavItem == NavigationItem.Genres) ||
+                                        (selectedNavItem == NavigationItem.Countries)
 
                     if (showBitrateFilters) {
                         BitrateFilters(
@@ -416,44 +566,182 @@ fun MainScreen(viewModel: MainViewModel) {
                     } else {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
-                                val homeGroups = if (visibleGenres.isEmpty()) genreGroups else genreGroups.filter { visibleGenres.contains(it.genreName) }
-                                
-                                if (homeGroups.isNotEmpty()) {
-                                    if (selectedTag == null) {
-                                        GenreGroupGrid(homeGroups) { name ->
-                                            viewModel.selectTag(tags.find { it.name == name })
+                                if (genreGroups.isNotEmpty()) {
+                                    if (selectedTag == null && selectedCountry == null) {
+                                        key("home_groups") {
+                                            GenreGroupGrid(
+                                                groups = genreGroups,
+                                                onGroupClick = { name ->
+                                                    val group = genreGroups.find { it.genreName == name }
+                                                    if (group?.isCountry == true) {
+                                                        val country = countries.find { it.name == name }
+                                                            ?: com.toxa.pureradio.network.Country(name = name, iso_3166_1 = "", stationcount = 0)
+                                                        viewModel.selectCountry(country)
+                                                    } else {
+                                                        val tag = tags.find { it.name == name }
+                                                            ?: com.toxa.pureradio.network.Tag(name = name, stationcount = group?.totalStations ?: 0)
+                                                        viewModel.selectTag(tag)
+                                                    }
+                                                },
+                                                onGroupLongClick = { name ->
+                                                    val group = genreGroups.find { it.genreName == name }
+                                                    if (group?.isCountry == false) {
+                                                        genreToRemove = name
+                                                    }
+                                                }
+                                            )
                                         }
                                     } else {
-                                        StationGrid(stations, viewModel) { stationToFavorite = it }
+                                        key(selectedTag?.name ?: selectedCountry?.name ?: "home_stations") {
+                                            StationGrid(
+                                                stations = stations,
+                                                viewModel = viewModel,
+                                                onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                                onLongClick = { stationToFavorite = it }
+                                            )
+                                        }
                                     }
                                 } else {
-                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    key("home_top") {
+                                        StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    }
                                 }
                             }
                             NavigationItem.Popular -> {
-                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                                key("popular_stations") {
+                                    StationGrid(
+                                        stations = stations,
+                                        viewModel = viewModel,
+                                        onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                        onLongClick = { stationToFavorite = it }
+                                    )
+                                }
                             }
                             NavigationItem.Recent -> {
-                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                                key("recent_stations") {
+                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                }
                             }
                             NavigationItem.Favourites -> {
-                                StationGrid(stations, viewModel) { stationToFavorite = it }
+                                key("favorite_stations") {
+                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                }
                             }
                             NavigationItem.Search -> {
-                                SearchScreen(viewModel, onLongClick = { stationToFavorite = it })
+                                SearchScreen(
+                                    viewModel,
+                                    onLongClick = { stationToFavorite = it },
+                                    onTagGroupLongClick = { tagName ->
+                                        if (visibleGenres.contains(tagName)) {
+                                            genreToRemove = tagName
+                                        } else {
+                                            genreToAdd = tags.find { it.name.equals(tagName, ignoreCase = true) }
+                                                ?: com.toxa.pureradio.network.Tag(name = tagName, stationcount = 0)
+                                        }
+                                    }
+                                )
                             }
                             NavigationItem.Genres -> {
-                                if (selectedTag == null) {
-                                    TagGrid(tags) { viewModel.selectTag(it) }
+                                    if (selectedTag == null) {
+                                    key("genres_list") {
+                                        Column(modifier = Modifier.fillMaxSize()) {
+                                            var localTagSearchQuery by remember { mutableStateOf(tagSearchQuery) }
+                                            LaunchedEffect(tagSearchQuery) {
+                                                if (tagSearchQuery != localTagSearchQuery) {
+                                                    localTagSearchQuery = tagSearchQuery
+                                                }
+                                            }
+                                            val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 32.dp, top = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                            OutlinedTextField(
+                                                value = localTagSearchQuery,
+                                                onValueChange = { localTagSearchQuery = it; viewModel.setTagSearchQuery(it) },
+                                                label = { Text("Search genres...") },
+                                                modifier = Modifier.weight(1f),
+                                                singleLine = true,
+                                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                                keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+                                                trailingIcon = {
+                                                    if (localTagSearchQuery.isNotEmpty()) {
+                                                        androidx.tv.material3.Button(
+                                                            onClick = { viewModel.setTagSearchQuery(""); localTagSearchQuery = "" },
+                                                            modifier = Modifier.size(36.dp),
+                                                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                                                containerColor = Color.Transparent,
+                                                                contentColor = Color.Gray
+                                                            )
+                                                        ) {
+                                                            Text("X", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                                                        }
+                                                    }
+                                                },
+                                                colors = TextFieldDefaults.colors(
+                                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    focusedContainerColor = Color.Transparent,
+                                                    unfocusedContainerColor = Color.Transparent
+                                                )
+                                                )
+                                                Spacer(modifier = Modifier.width(16.dp))
+                                                Text("Sort: ", style = MaterialTheme.typography.labelLarge)
+                                                com.toxa.pureradio.ui.viewmodel.GenreSortMode.entries.forEach { mode ->
+                                                    Button(
+                                                        onClick = { viewModel.setGenreSortMode(mode) },
+                                                        modifier = Modifier.padding(horizontal = 4.dp),
+                                                        colors = if (genreSortMode == mode) {
+                                                            androidx.tv.material3.ButtonDefaults.colors(
+                                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                                            )
+                                                        } else {
+                                                            androidx.tv.material3.ButtonDefaults.colors()
+                                                        }
+                                                    ) {
+                                                        Text(if (mode == com.toxa.pureradio.ui.viewmodel.GenreSortMode.Name) "Name" else "Count")
+                                                    }
+                                                }
+                                            }
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                TagGrid(
+                                                    tags = filteredTags,
+                                                    onTagClick = { viewModel.selectTag(it) },
+                                                    onTagLongClick = { tag ->
+                                                        genreToAdd = tag
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
                                 } else {
-                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    key(selectedTag!!.name) {
+                                        StationGrid(
+                                            stations = stations,
+                                            viewModel = viewModel,
+                                            onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                            onLongClick = { stationToFavorite = it }
+                                        )
+                                    }
                                 }
                             }
                             NavigationItem.Countries -> {
                                 if (selectedCountry == null) {
-                                    CountryGrid(countries) { viewModel.selectCountry(it) }
+                                    key("countries_list") {
+                                        CountryGrid(countries) { viewModel.selectCountry(it) }
+                                    }
                                 } else {
-                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    key(selectedCountry!!.name) {
+                                        StationGrid(
+                                            stations = stations,
+                                            viewModel = viewModel,
+                                            onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                            onLongClick = { stationToFavorite = it }
+                                        )
+                                    }
                                 }
                             }
                             NavigationItem.Settings -> {
@@ -661,6 +949,271 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    genreToAdd?.let { tag ->
+        val addFocusRequester = remember { FocusRequester() }
+        val backFocusRequester = remember { FocusRequester() }
+        Dialog(onDismissRequest = { genreToAdd = null }) {
+            Surface(
+                modifier = Modifier.width(420.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = SurfaceDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    shape = MaterialTheme.shapes.extraLarge
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Home,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "Add to Home Tab?",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { if (isGenreDialogReady) genreToAdd = null },
+                            modifier = Modifier.weight(1f).focusRequester(backFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("BACK", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Button(
+                            onClick = {
+                                if (isGenreDialogReady) {
+                                    viewModel.toggleGenreVisibility(tag.name)
+                                    genreToAdd = null
+                                }
+                            },
+                            modifier = Modifier.weight(1f).focusRequester(addFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Text(
+                                "ADD",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    LaunchedEffect(Unit) {
+                        try { addFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
+    genreToRemove?.let { genreName ->
+        val removeFocusRequester = remember { FocusRequester() }
+        val backFocusRequester = remember { FocusRequester() }
+        Dialog(onDismissRequest = { genreToRemove = null }) {
+            Surface(
+                modifier = Modifier.width(420.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = SurfaceDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    shape = MaterialTheme.shapes.extraLarge
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Home,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "Remove from Home Tab?",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { if (isGenreDialogReady) genreToRemove = null },
+                            modifier = Modifier.weight(1f).focusRequester(backFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("BACK", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Button(
+                            onClick = {
+                                if (isGenreDialogReady) {
+                                    viewModel.toggleGenreVisibility(genreName)
+                                    genreToRemove = null
+                                }
+                            },
+                            modifier = Modifier.weight(1f).focusRequester(removeFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        ) {
+                            Text(
+                                "REMOVE",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    LaunchedEffect(Unit) {
+                        try { removeFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
+    if (showExitDialog) {
+        val exitYesFocusRequester = remember { FocusRequester() }
+        val exitNoFocusRequester = remember { FocusRequester() }
+        Dialog(onDismissRequest = { showExitDialog = false }) {
+            Surface(
+                modifier = Modifier.width(420.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = SurfaceDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    shape = MaterialTheme.shapes.extraLarge
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "Exit The Application?",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { showExitDialog = false },
+                            modifier = Modifier.weight(1f).focusRequester(exitNoFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("NO", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Button(
+                            onClick = { kotlin.system.exitProcess(0) },
+                            modifier = Modifier.weight(1f).focusRequester(exitYesFocusRequester),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        ) {
+                            Text("YES", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    LaunchedEffect(Unit) {
+                        try { exitNoFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
     pendingImportStations?.let { stations ->
         var showConfirmation by remember { mutableStateOf(false) }
         val restoreFocusRequester = remember { FocusRequester() }
@@ -807,6 +1360,14 @@ fun SettingsScreen(
     androidx.compose.ui.platform.LocalContext.current
     val visibleGenres by viewModel.visibleGenres.collectAsState()
     val tags by viewModel.tags.collectAsState()
+    val filteredTags by viewModel.filteredTags.collectAsState()
+    val tagSearchQuery by viewModel.tagSearchQuery.collectAsState()
+    var localTagSearchQuery by remember { mutableStateOf(tagSearchQuery) }
+    LaunchedEffect(tagSearchQuery) {
+        if (tagSearchQuery != localTagSearchQuery) {
+            localTagSearchQuery = tagSearchQuery
+        }
+    }
     val settingsSubMenu by viewModel.settingsSubMenu.collectAsState()
     val hideBroken by viewModel.hideBrokenStations.collectAsState()
     val serverStats by viewModel.serverStats.collectAsState()
@@ -817,6 +1378,8 @@ fun SettingsScreen(
     val screensaverMode by viewModel.screensaverMode.collectAsState()
     val audioPassthrough by viewModel.audioPassthrough.collectAsState()
     val genreSortMode by viewModel.genreSortMode.collectAsState()
+    val appTheme by viewModel.appTheme.collectAsState()
+    val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
 
     val subMenuFocusRequester = remember { FocusRequester() }
     val mainMenuFocusRequester = remember { FocusRequester() }
@@ -868,7 +1431,35 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
-                items(tags) { tag ->
+                
+                item {
+                    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                    OutlinedTextField(
+                        value = localTagSearchQuery,
+                        onValueChange = { viewModel.setTagSearchQuery(it); localTagSearchQuery = it },
+                        label = { Text("Search tags...") },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+                        colors = TextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent
+                        )
+                    )
+                }
+                
+                item {
+                    Text("GENRES", style = MaterialTheme.typography.titleMedium, 
+                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                
+                items(filteredTags) { tag ->
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleGenreVisibility(tag.name) },
@@ -883,6 +1474,7 @@ fun SettingsScreen(
                         }
                     )
                 }
+                
             }
         }
         "AutoUpdate" -> {
@@ -893,8 +1485,7 @@ fun SettingsScreen(
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
-                            onClick = { viewModel.setSettingsSubMenu(null) },
-                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                            onClick = { viewModel.setSettingsSubMenu(null) }
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
@@ -908,20 +1499,23 @@ fun SettingsScreen(
                     12 to "Every 12 Hours",
                     24 to "Every 24 Hours"
                 )
-                items(options) { (hours, label) ->
-                    ListItem(
-                        selected = autoUpdateInterval == hours,
-                        onClick = { 
-                            viewModel.setAutoUpdateInterval(hours)
-                            viewModel.setSettingsSubMenu(null)
-                        },
-                        headlineContent = { Text(label) },
-                        trailingContent = {
-                            if (autoUpdateInterval == hours) {
-                                Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                options.forEachIndexed { index, (hours, label) ->
+                    item(key = hours) {
+                        ListItem(
+                            selected = autoUpdateInterval == hours,
+                            onClick = { 
+                                viewModel.setAutoUpdateInterval(hours)
+                                viewModel.setSettingsSubMenu(null)
+                            },
+                            modifier = if (index == 0) Modifier.focusRequester(subMenuFocusRequester) else Modifier,
+                            headlineContent = { Text(label) },
+                            trailingContent = {
+                                if (autoUpdateInterval == hours) {
+                                    Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -933,8 +1527,7 @@ fun SettingsScreen(
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
-                            onClick = { viewModel.setSettingsSubMenu(null) },
-                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                            onClick = { viewModel.setSettingsSubMenu(null) }
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
@@ -947,6 +1540,7 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleScreensaver(!screensaverEnabled) },
+                        modifier = Modifier.focusRequester(subMenuFocusRequester),
                         headlineContent = { Text("Activate Screensaver") },
                         supportingContent = { Text("Automatically engage when music is playing") },
                         trailingContent = {
@@ -994,6 +1588,55 @@ fun SettingsScreen(
                 }
             }
         }
+        "AppTheme" -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Application Theme", style = MaterialTheme.typography.headlineMedium)
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+                items(com.toxa.pureradio.ui.viewmodel.AppTheme.entries) { theme ->
+                    val label = when (theme) {
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Retro Gold"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Blue Neon"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Violet"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Monochrome"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Forest"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "Contrast"
+                    }
+                    val desc = when (theme) {
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Classic gold and wood tones"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Cool blue neon glow"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Purple and violet tones"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Grey and black"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Green and black"
+                        com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "White and black"
+                    }
+                    ListItem(
+                        selected = appTheme == theme,
+                        onClick = { viewModel.setAppTheme(theme) },
+                        headlineContent = { Text(label) },
+                        supportingContent = { Text(desc) },
+                        trailingContent = {
+                            if (appTheme == theme) {
+                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    )
+                }
+            }
+        }
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -1005,15 +1648,36 @@ fun SettingsScreen(
                 }
 
                 item {
-                    Text("INTERFACE & CONTENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
                     ListItem(
                         selected = false,
-                        onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
-                        modifier = Modifier.focusRequester(mainMenuFocusRequester),
-                        headlineContent = { Text("Home Screen Curation") },
-                        supportingContent = { Text("Choose which genres appear on your primary dashboard") },
-                        leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
+                        onClick = { viewModel.setSettingsSubMenu("AppTheme") },
+                        headlineContent = { Text("Application Theme") },
+                        supportingContent = {
+                            val label = when (appTheme) {
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Retro Gold"
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Blue Neon"
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Violet"
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Monochrome"
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Forest"
+                                com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "Contrast"
+                            }
+                            Text("Current: $label")
+                        },
+                        leadingContent = { Icon(Icons.Default.TheaterComedy, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setQuitConfirmationEnabled(!quitConfirmationEnabled) },
+                        headlineContent = { Text("Quit Confirmation") },
+                        supportingContent = { Text("Ask before exiting the application") },
+                        leadingContent = { Icon(Icons.Default.Warning, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = quitConfirmationEnabled, onCheckedChange = null)
+                        }
                     )
                 }
 
@@ -1126,6 +1790,19 @@ fun SettingsScreen(
                 }
 
                 item {
+                    Text("INTERFACE & CONTENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
+                        modifier = Modifier.focusRequester(mainMenuFocusRequester),
+                        headlineContent = { Text("Home Screen Curation") },
+                        supportingContent = { Text("Choose which genres appear on your primary dashboard") },
+                        leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp),
                         horizontalArrangement = Arrangement.Center
@@ -1184,79 +1861,182 @@ fun SettingsScreen(
 }
 
 @Composable
-fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}) {
+fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, onTagGroupLongClick: ((String) -> Unit)? = null) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val stations by viewModel.stations.collectAsState()
     val recentSearches by viewModel.recentSearches.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val focusRequester = remember { FocusRequester() }
+    val searchMode by viewModel.searchMode.collectAsState()
+    val tagSearchGroups by viewModel.tagSearchGroups.collectAsState()
+    val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
+    val searchFocusTrigger by viewModel.searchFocusTrigger.collectAsState()
+    val searchFieldFocusRequester = remember { FocusRequester() }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val searchTriggered = remember { mutableIntStateOf(0) }
+    var localSearchQuery by remember { mutableStateOf(searchQuery) }
+    var isSearchFieldFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    val prevSelectedSearchTag = remember { mutableStateOf(selectedSearchTag) }
+    val isReturning = selectedSearchTag == null && prevSelectedSearchTag.value != null
+    LaunchedEffect(selectedSearchTag) {
+        prevSelectedSearchTag.value = selectedSearchTag
     }
 
+    LaunchedEffect(searchQuery) {
+        if (searchQuery != localSearchQuery) {
+            localSearchQuery = searchQuery
+        }
+    }
+
+    LaunchedEffect(searchFocusTrigger) {
+        if (searchFocusTrigger > 0 && !isSearchFieldFocused) {
+            try { searchFieldFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
     Column(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { query -> viewModel.onSearchQueryChange(query) },
+                value = localSearchQuery,
+                onValueChange = { viewModel.onSearchQueryChange(it); localSearchQuery = it },
                 label = { Text("Search stations...") },
                 modifier = Modifier
                     .weight(1f)
                     .padding(bottom = 16.dp)
-                    .focusRequester(focusRequester),
+                    .focusRequester(searchFieldFocusRequester)
+                    .onFocusChanged { isSearchFieldFocused = it.isFocused },
                 singleLine = true,
+                trailingIcon = {
+                    if (localSearchQuery.isNotEmpty()) {
+                        androidx.tv.material3.Button(
+                            onClick = { viewModel.onSearchQueryChange(""); localSearchQuery = "" },
+                            modifier = Modifier.size(36.dp),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(
+                                containerColor = Color.Transparent,
+                                contentColor = Color.Gray
+                            )
+                        ) {
+                            Text("X", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                        }
+                    }
+                },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(
                     onSearch = {
-                        viewModel.addToRecentSearches(searchQuery)
+                        searchTriggered.intValue++
+                        viewModel.addToRecentSearches(localSearchQuery)
+                        keyboardController?.hide()
                     }
                 ),
                 colors = TextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                     focusedLabelColor = MaterialTheme.colorScheme.primary,
-                    unfocusedLabelColor = Color.Gray,
+                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent
                 )
             )
-            if (isLoading) {
-                Spacer(modifier = Modifier.width(16.dp))
-                Text("Searching...", style = MaterialTheme.typography.bodySmall)
+            Button(
+                onClick = { viewModel.toggleSearchMode() },
+                modifier = Modifier.padding(bottom = 16.dp),
+                colors = if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag) {
+                    androidx.tv.material3.ButtonDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    androidx.tv.material3.ButtonDefaults.colors()
+                }
+            ) {
+                Text(if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag) "TAG" else "NAME")
             }
         }
         
-        if (stations.isEmpty() && searchQuery.isEmpty()) {
-            if (recentSearches.isNotEmpty()) {
-                Text("Recent Searches", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
-                LazyRow {
-                    items(recentSearches) { query ->
-                        Button(
-                            onClick = { viewModel.onSearchQueryChange(query) },
-                            modifier = Modifier.padding(end = 8.dp)
-                        ) {
-                            Text(query)
+        if (isLoading) {
+            Text("Searching...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
+        }
+        
+        Box(modifier = Modifier.weight(1f)) {
+            if (stations.isEmpty() && localSearchQuery.isEmpty() && tagSearchGroups.isEmpty()) {
+                if (recentSearches.isNotEmpty()) {
+                    Column {
+                        Text("Recent Searches", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                        LazyRow {
+                            items(recentSearches) { query ->
+                                Button(
+                                    onClick = { 
+                                        searchTriggered.intValue++
+                                        viewModel.onSearchQueryChange(query) 
+                                    },
+                                    modifier = Modifier.padding(end = 8.dp)
+                                ) {
+                                    Text(query)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
+                }
+            } else if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag && tagSearchGroups.isNotEmpty() && selectedSearchTag == null) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Text(
+                        text = "Found ${stations.size} stations — select a tag to filter",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        key(searchTriggered.intValue) {
+                            GenreGroupGrid(
+                                groups = tagSearchGroups,
+                                autoFocus = isReturning || searchTriggered.intValue > 0,
+                                onGroupClick = { tagName ->
+                                    viewModel.selectSearchTag(tagName)
+                                },
+                                onGroupLongClick = { tagName ->
+                                    onTagGroupLongClick?.invoke(tagName)
+                                }
+                            )
                         }
                     }
                 }
             } else {
-                Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
-            }
-        } else {
-            Box(modifier = Modifier.weight(1f)) {
-                StationGrid(stations, viewModel, autoFocus = false, onLongClick = onLongClick)
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (selectedSearchTag != null) {
+                        Row(modifier = Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = selectedSearchTag!!.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "(${stations.size} stations)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        key(searchTriggered.intValue) {
+                            StationGrid(stations, viewModel, autoFocus = selectedSearchTag != null || searchTriggered.intValue > 0, onLongClick = onLongClick)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit) {
+fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit, onGroupLongClick: ((String) -> Unit)? = null) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(groups.isEmpty()) {
+    val hasFocused = remember { mutableStateOf(false) }
+    LaunchedEffect(autoFocus, groups.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
+            if (groups.isNotEmpty()) hasFocused.value = true
         }
     }
     if (groups.isEmpty()) {
@@ -1267,10 +2047,11 @@ fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupC
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            itemsIndexed(groups) { index, group ->
+            itemsIndexed(groups, key = { _, group -> group.genreName }) { index, group ->
                 GenreGroupCard(
                     group = group.copy(genreName = group.genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }),
                     onClick = { onGroupClick(group.genreName) },
+                    onLongClick = if (onGroupLongClick != null) {{ onGroupLongClick(group.genreName) }} else null,
                     modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
                 )
             }
@@ -1278,11 +2059,12 @@ fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupC
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     Card(
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier
             .padding(8.dp)
             .height(180.dp),
@@ -1415,60 +2197,111 @@ fun StationGrid(
     stations: List<Station>, 
     viewModel: MainViewModel, 
     autoFocus: Boolean = true,
+    onLoadMore: (() -> Unit)? = null,
     onLongClick: (Station) -> Unit = {}
 ) {
     val favorites by viewModel.favorites.collectAsState()
     val currentStation by viewModel.currentStation.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val focusRequester = remember { FocusRequester() }
+    val loadMoreFocusRequester = remember { FocusRequester() }
+    var loadMoreCount by remember { mutableIntStateOf(0) }
+    val hasFocused = remember { mutableStateOf(false) }
     
-    LaunchedEffect(stations.isEmpty()) {
-        if (autoFocus) {
+    LaunchedEffect(autoFocus, stations.isNotEmpty()) {
+        if (autoFocus && loadMoreCount == 0) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
+            if (stations.isNotEmpty()) hasFocused.value = true
         }
     }
 
-    if (stations.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
-    } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(5),
-            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            itemsIndexed(stations) { index, station ->
-                StationCard(
-                    station = station,
-                    isFavorite = favorites.contains(station.stationUuid),
-                    isCurrent = currentStation?.stationUuid == station.stationUuid,
-                    onClick = { viewModel.playStation(station) },
-                    onLongClick = { onLongClick(station) },
-                    modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
-                )
+    LaunchedEffect(isLoading) {
+        if (!isLoading && loadMoreCount > 0) {
+            delay(100)
+            try { loadMoreFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusRequester(focusRequester)
+    ) {
+        if (stations.isNotEmpty()) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(5),
+                contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                itemsIndexed(stations, key = { _, station -> station.stationUuid }) { index, station ->
+                    StationCard(
+                        station = station,
+                        isFavorite = favorites.contains(station.stationUuid),
+                        isCurrent = currentStation?.stationUuid == station.stationUuid,
+                        onClick = { viewModel.playStation(station) },
+                        onLongClick = { onLongClick(station) },
+                        modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
+                    )
+                }
+                
+                if (onLoadMore != null) {
+                    item(key = "load_more", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(5) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (!isLoading) {
+                                        loadMoreCount++
+                                        onLoadMore()
+                                    }
+                                },
+                                modifier = Modifier.focusRequester(loadMoreFocusRequester),
+                                colors = androidx.tv.material3.ButtonDefaults.colors(
+                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    contentColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                if (isLoading) {
+                                    Text("Loading...", style = MaterialTheme.typography.labelLarge)
+                                } else {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Load More Stations", style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit) {
+fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit, onTagLongClick: ((Tag) -> Unit)? = null) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(tags.isEmpty()) {
+    val hasFocused = remember { mutableStateOf(false) }
+    LaunchedEffect(autoFocus, tags.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
+            if (tags.isNotEmpty()) hasFocused.value = true
         }
     }
     if (tags.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
+        Box(modifier = Modifier.fillMaxSize())
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            itemsIndexed(tags) { index, tag ->
+            itemsIndexed(tags, key = { _, tag -> tag.name }) { index, tag ->
                 Card(
                     onClick = { onTagClick(tag) },
+                    onLongClick = if (onTagLongClick != null) {{ onTagLongClick(tag) }} else null,
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)
@@ -1536,9 +2369,11 @@ fun CountryGrid(
     onCountryClick: (Country) -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(countries.isEmpty()) {
+    val hasFocused = remember { mutableStateOf(false) }
+    LaunchedEffect(autoFocus, countries.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
+            if (countries.isNotEmpty()) hasFocused.value = true
         }
     }
     if (countries.isEmpty()) {
@@ -1549,7 +2384,7 @@ fun CountryGrid(
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            itemsIndexed(countries) { index, country ->
+            itemsIndexed(countries, key = { _, country -> country.iso_3166_1 }) { index, country ->
                 Card(
                     onClick = { onCountryClick(country) },
                     modifier = Modifier

@@ -28,26 +28,43 @@ class RadioRepository {
         tag: String? = null,
         country: String? = null,
         limit: Int = 100,
+        offset: Int = 0,
         hideBroken: Boolean = false
     ): List<Station> {
         return try {
-            val byName = service.searchStations(
+            val results = service.searchStations(
                 name = query,
                 tag = tag,
                 country = country,
                 limit = limit,
+                offset = offset,
                 hideBroken = hideBroken
             )
-            if (query != null && byName.size < 10 && tag == null) {
-                val byTag = service.searchStations(
-                    tag = query,
-                    country = country,
-                    limit = limit,
-                    hideBroken = hideBroken
-                )
-                (byName + byTag).distinctBy { it.stationUuid }
+            
+            if (results.size < 10) {
+                if (query != null && tag == null) {
+                    val byTag = service.searchStations(
+                        tag = query,
+                        country = country,
+                        limit = limit,
+                        offset = offset,
+                        hideBroken = hideBroken
+                    )
+                    (results + byTag).distinctBy { it.stationUuid }
+                } else if (tag != null && query == null) {
+                    val byName = service.searchStations(
+                        name = tag,
+                        country = country,
+                        limit = limit,
+                        offset = offset,
+                        hideBroken = hideBroken
+                    )
+                    (results + byName).distinctBy { it.stationUuid }
+                } else {
+                    results
+                }
             } else {
-                byName
+                results
             }
         } catch (e: Exception) {
             emptyList()
@@ -62,9 +79,9 @@ class RadioRepository {
         }
     }
 
-    suspend fun getTags(): List<Tag> {
+    suspend fun getTags(limit: Int = 500): List<Tag> {
         return try {
-            service.getTags()
+            service.getTags(limit = limit)
         } catch (e: Exception) {
             emptyList()
         }

@@ -20,3 +20,5 @@ val BlueTertiary = Color(0xFF81D4FA)
 
 val White = Color(0xFFF5F5F5)
 val Grey = Color(0xFF9E9E9E)
+val BlueDark = Color(0xFF0D2137)
+val ForestDark = Color(0xFF0D2B0D)
