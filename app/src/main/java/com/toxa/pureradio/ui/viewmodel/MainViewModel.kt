@@ -106,6 +106,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _genreSortMode = MutableStateFlow(GenreSortMode.Count)
     val genreSortMode: StateFlow<GenreSortMode> = _genreSortMode
 
+    private val _minTagFilter = MutableStateFlow(prefs.getBoolean("min_tag_filter", false))
+    val minTagFilter: StateFlow<Boolean> = _minTagFilter
+
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
     val tags: StateFlow<List<Tag>> = combine(_tags, _genreSortMode) { tags, mode ->
         when (mode) {
@@ -141,7 +144,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _tagSearchQuery = MutableStateFlow("")
     val tagSearchQuery: StateFlow<String> = _tagSearchQuery
 
-    val filteredTags: StateFlow<List<Tag>> = combine(_tags, _tagSearchQuery, _genreSortMode, _selectedBitrates) { tags, query, mode, bitrates ->
+    val filteredTags: StateFlow<List<Tag>> = combine(_tags, _tagSearchQuery, _genreSortMode, _selectedBitrates, _minTagFilter) { tags, query, mode, bitrates, minFilter ->
         val sorted = when (mode) {
             GenreSortMode.Name -> tags.sortedBy { it.name.lowercase() }
             GenreSortMode.Count -> tags.sortedByDescending { it.stationcount }
@@ -149,9 +152,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val filteredByQuery = if (query.isBlank()) sorted
         else sorted.filter { it.name.contains(query, ignoreCase = true) }
         
-        // Note: We can't easily filter the main tags list by bitrate without separate API calls for each tag.
-        // For now, we keep the full list, but the bitrate filters are visible so they can be set before clicking a tag.
-        filteredByQuery
+        val filteredByMin = if (minFilter) filteredByQuery.filter { it.stationcount >= 101 }
+        else filteredByQuery
+
+        filteredByMin
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _favorites = MutableStateFlow<Set<String>>(loadFavoritesFromPrefs())
@@ -227,6 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastInteractionTime = System.currentTimeMillis()
     private var consecutiveErrors = 0
+    private var searchJob: kotlinx.coroutines.Job? = null
 
     init {
         initializePlayer()
@@ -535,11 +540,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun parsePlaylistLines(lines: List<String>): List<Station> {
         if (lines.isEmpty()) return emptyList()
         
-        val firstLine = lines.firstOrNull { it.isNotBlank() } ?: return emptyList()
+        val firstLine = lines.firstOrNull { it.isNotBlank() }?.trim()?.removePrefix("\uFEFF") ?: return emptyList()
         
         return when {
-            firstLine.trim().startsWith("#EXTM3U", ignoreCase = true) -> parseM3uLines(lines)
-            firstLine.trim().startsWith("[playlist]", ignoreCase = true) -> parsePlsLines(lines)
+            firstLine.startsWith("#EXTM3U", ignoreCase = true) -> parseM3uLines(lines)
+            firstLine.startsWith("[playlist]", ignoreCase = true) -> parsePlsLines(lines)
+            firstLine.contains("=", ignoreCase = false) && firstLine.any { it.isDigit() } -> {
+                // Might be a PLS file without header (e.g. File1=url or URL1=url)
+                parsePlsLines(lines)
+            }
             else -> {
                 // Try M3U even if no header, or just plain list of URLs
                 parseM3uLines(lines)
@@ -571,7 +580,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         entries.keys.sorted().forEach { index ->
             val entry = entries[index] ?: return@forEach
-            val url = entry["file"] ?: return@forEach
+            val url = entry["file"] ?: entry["url"] ?: return@forEach
             val name = entry["title"] ?: url.substringAfterLast("/").substringBefore("?")
             
             importedStations.add(Station(
@@ -849,6 +858,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshCurrentContent()
     }
 
+    fun toggleMinTagFilter() {
+        val newValue = !_minTagFilter.value
+        _minTagFilter.value = newValue
+        prefs.edit().putBoolean("min_tag_filter", newValue).apply()
+    }
+
     fun setSettingsSubMenu(menu: String?) {
         _settingsSubMenu.value = menu
     }
@@ -1007,6 +1022,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _genreGroups.value = _genreGroups.value.map { group ->
             group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
         }
+
+        _tagSearchGroups.value = _tagSearchGroups.value.map { group ->
+            group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
+        }
+
+        if (!_isLoading.value && _stations.value.size < 100 && _hasMoreStations.value) {
+            loadMoreStations(5)
+        }
     }
 
     private fun matchesBitrateFilter(station: Station, bitrates: Set<BitrateFilter>): Boolean {
@@ -1028,50 +1051,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _stationOffset.value = 0
             _hasMoreStations.value = true
             try {
-                val stations = repository.searchStations(limit = 250, offset = 0, hideBroken = _hideBrokenStations.value)
-                _hasMoreStations.value = stations.size >= 250
+                val stations = repository.searchStations(limit = 100, offset = 0, hideBroken = _hideBrokenStations.value)
+                _hasMoreStations.value = stations.size >= 100
                 updateStations(stations)
             } catch (e: Exception) {
                 _error.value = "Failed to load popular stations"
             } finally {
                 _isLoading.value = false
+                applyFilters()
             }
         }
     }
 
-    fun loadMoreStations() {
+    fun loadMoreStations(remainingRetries: Int = 0) {
         if (!_hasMoreStations.value || _isLoading.value) return
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val newOffset = _stationOffset.value + 250
+                val newOffset = _stationOffset.value + 100
                 val hideBroken = _hideBrokenStations.value
                 val newStations = when (_selectedNavItem.value) {
                     NavigationItem.Popular -> {
-                        repository.searchStations(limit = 250, offset = newOffset, hideBroken = hideBroken)
+                        repository.searchStations(limit = 100, offset = newOffset, hideBroken = hideBroken)
                     }
                     NavigationItem.Home, NavigationItem.Genres -> {
                         val tag = _selectedTag.value
                         if (tag != null) {
-                            repository.searchStations(tag = tag.name, limit = 250, offset = newOffset, hideBroken = hideBroken)
-                        } else emptyList()
+                            repository.searchStations(tag = tag.name, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                        } else {
+                            repository.searchStations(limit = 100, offset = newOffset, hideBroken = hideBroken)
+                        }
                     }
                     NavigationItem.Countries -> {
                         val country = _selectedCountry.value
                         if (country != null) {
-                            repository.searchStations(country = country.name, limit = 250, offset = newOffset, hideBroken = hideBroken)
+                            repository.searchStations(country = country.name, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                        } else emptyList()
+                    }
+                    NavigationItem.Search -> {
+                        val query = _searchQuery.value
+                        if (query.isNotEmpty()) {
+                            if (_searchMode.value == SearchMode.Name) {
+                                repository.searchStations(query = query, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                            } else {
+                                repository.searchStations(tag = query, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                            }
                         } else emptyList()
                     }
                     else -> emptyList()
                 }
-                _hasMoreStations.value = newStations.size >= 250
+                _hasMoreStations.value = newStations.size >= 100
                 _stationOffset.value = newOffset
-                _allStations.value = _allStations.value + newStations
+                _allStations.value = (_allStations.value + newStations).distinctBy { it.stationUuid }
                 applyFilters()
             } catch (e: Exception) {
                 _error.value = "Failed to load more stations"
             } finally {
                 _isLoading.value = false
+            }
+
+            // Chain more pages if filtered count is still low
+            if (remainingRetries > 0 && _stations.value.size < 100 && _hasMoreStations.value) {
+                loadMoreStations(remainingRetries - 1)
             }
         }
     }
@@ -1079,6 +1120,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadTopStations() {
         viewModelScope.launch {
             _isLoading.value = true
+
+            // Instantly update genre group counts from existing data before refreshing
+            if (_genreGroups.value.isNotEmpty()) {
+                applyFilters()
+            }
+
             try {
                 val selectedGenres = _visibleGenres.value
                 val selectedCountries = _visibleCountries.value
@@ -1086,7 +1133,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (selectedGenres.isEmpty() && selectedCountries.isEmpty()) {
                     _genreGroups.value = emptyList()
+                    _stationOffset.value = 0
                     val topStations = repository.getTopStations(hideBroken = hideBroken)
+                    _hasMoreStations.value = topStations.size >= 100
                     if (_selectedBitrates.value.contains(BitrateFilter.FLAC)) {
                         val flacStations = repository.searchStations(tag = "flac", limit = 100, hideBroken = hideBroken)
                         updateStations((topStations + flacStations).distinctBy { it.stationUuid })
@@ -1099,19 +1148,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     
                     val genreDeferred = selectedGenres.map { genre ->
                         async(Dispatchers.IO) {
-                            val genreStations = repository.searchStations(tag = genre, limit = 250, hideBroken = hideBroken)
-                            val total = _tags.value.find { it.name == genre }?.stationcount ?: genreStations.size
-                            val filteredCount = genreStations.count { matchesBitrateFilter(it, bitrates) }
-                            GenreGroup(genre, genreStations, total, filteredCount, isCountry = false)
+                            var offset = 0
+                            var allStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+                            var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+                            var retries = 0
+                            while (retries < 5 && allStations.size >= 100 && filteredCount < 100) {
+                                offset += 100
+                                val moreStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+                                if (moreStations.isEmpty()) break
+                                allStations = (allStations + moreStations).distinctBy { it.stationUuid }
+                                filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+                                retries++
+                            }
+                            val total = _tags.value.find { it.name == genre }?.stationcount ?: allStations.size
+                            GenreGroup(genre, allStations, total, filteredCount, isCountry = false)
                         }
                     }
                     
                     val countryDeferred = selectedCountries.map { country ->
                         async(Dispatchers.IO) {
-                            val countryStations = repository.searchStations(country = country, limit = 250, hideBroken = hideBroken)
-                            val total = _countries.value.find { it.name == country }?.stationcount ?: countryStations.size
-                            val filteredCount = countryStations.count { matchesBitrateFilter(it, bitrates) }
-                            GenreGroup(country, countryStations, total, filteredCount, isCountry = true)
+                            var offset = 0
+                            var allStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+                            var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+                            var retries = 0
+                            while (retries < 5 && allStations.size >= 100 && filteredCount < 100) {
+                                offset += 100
+                                val moreStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+                                if (moreStations.isEmpty()) break
+                                allStations = (allStations + moreStations).distinctBy { it.stationUuid }
+                                filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+                                retries++
+                            }
+                            val total = _countries.value.find { it.name == country }?.stationcount ?: allStations.size
+                            GenreGroup(country, allStations, total, filteredCount, isCountry = true)
                         }
                     }
                     
@@ -1122,6 +1191,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _error.value = "Failed to load stations"
             } finally {
                 _isLoading.value = false
+                if (_genreGroups.value.isEmpty()) {
+                    applyFilters()
+                }
             }
         }
     }
@@ -1289,8 +1361,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
-                val stations = repository.searchStations(tag = tag.name, limit = 250, hideBroken = _hideBrokenStations.value)
-                _hasMoreStations.value = stations.size >= 250
+                val stations = repository.searchStations(tag = tag.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                _hasMoreStations.value = stations.size >= 100
                 if (isFlacFilter) {
                     val flacStations = repository.searchStations(tag = "flac", query = tag.name, limit = 100, hideBroken = _hideBrokenStations.value)
                     updateStations((stations + flacStations).distinctBy { it.stationUuid })
@@ -1301,6 +1373,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _error.value = "Failed to load stations for genre"
             } finally {
                 _isLoading.value = false
+                applyFilters()
             }
         }
     }
@@ -1321,8 +1394,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
-                val stations = repository.searchStations(country = country.name, limit = 250, hideBroken = _hideBrokenStations.value)
-                _hasMoreStations.value = stations.size >= 250
+                val stations = repository.searchStations(country = country.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                _hasMoreStations.value = stations.size >= 100
                 if (isFlacFilter) {
                     val flacStations = repository.searchStations(tag = "flac", country = country.name, limit = 100, hideBroken = _hideBrokenStations.value)
                     updateStations((stations + flacStations).distinctBy { it.stationUuid })
@@ -1333,6 +1406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _error.value = "Failed to load stations for country"
             } finally {
                 _isLoading.value = false
+                applyFilters()
             }
         }
     }
@@ -1352,10 +1426,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
         if (query.length > 2) {
-            when (_searchMode.value) {
-                SearchMode.Name -> searchStations(query)
-                SearchMode.Tag -> searchStationsByTag(query)
+            searchJob?.cancel()
+            searchJob = viewModelScope.launch {
+                delay(400) // Debounce
+                when (_searchMode.value) {
+                    SearchMode.Name -> searchStations(query)
+                    SearchMode.Tag -> searchStationsByTag(query)
+                }
             }
+        } else if (query.isEmpty()) {
+            clearSearch()
         }
     }
 
@@ -1364,27 +1444,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (tagName == null) {
             applyFilters()
         } else {
-            val bitrates = _selectedBitrates.value
             val hideBroken = _hideBrokenStations.value
             
             // First show what we have locally
             val localFiltered = _allStations.value.filter { station ->
                 station.tags.split(",").any { it.trim().equals(tagName, ignoreCase = true) }
             }
-            _stations.value = localFiltered.filter { matchesBitrateFilter(it, bitrates) }
+            _stations.value = localFiltered
             
             // Then fetch comprehensive list for this specific tag
             viewModelScope.launch {
                 _isLoading.value = true
                 try {
-                    val remoteStations = repository.searchStations(tag = tagName, limit = 250, hideBroken = hideBroken)
+                    val remoteStations = repository.searchStations(tag = tagName, limit = 100, hideBroken = hideBroken)
+                    _hasMoreStations.value = false
                     val combined = (_allStations.value + remoteStations).distinctBy { it.stationUuid }
                     _allStations.value = combined
                     
                     val filtered = combined.filter { station ->
                         station.tags.split(",").any { it.trim().equals(tagName, ignoreCase = true) }
                     }
-                    _stations.value = filtered.filter { matchesBitrateFilter(it, bitrates) }
+                    _stations.value = filtered
                 } catch (e: Exception) {
                     // Fallback to local if remote fails
                 } finally {
@@ -1398,6 +1478,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val searchFocusTrigger: StateFlow<Int> = _searchFocusTrigger
 
     fun clearSearch() {
+        searchJob?.cancel()
         _searchQuery.value = ""
         _allStations.value = emptyList()
         _stations.value = emptyList()
@@ -1407,22 +1488,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun searchStationsByTag(tagQuery: String) {
+        _isLoading.value = true
+        _error.value = null
+        _selectedSearchTag.value = null
+        _stationOffset.value = 0
+        _hasMoreStations.value = true
+        
         viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-            _selectedSearchTag.value = null
             try {
-                val results = repository.searchStations(tag = tagQuery, hideBroken = _hideBrokenStations.value)
-                _allStations.value = results
+                val hideBroken = _hideBrokenStations.value
+                var offset = 0
+                var allResults = repository.searchStations(tag = tagQuery, limit = 100, offset = offset, hideBroken = hideBroken)
+                var retries = 0
+                while (retries < 5 && allResults.size >= 100) {
+                    offset += 100
+                    val more = repository.searchStations(tag = tagQuery, limit = 100, offset = offset, hideBroken = hideBroken)
+                    if (more.isEmpty()) break
+                    allResults = (allResults + more).distinctBy { it.stationUuid }
+                    retries++
+                }
                 
                 val tagMap = mutableMapOf<String, MutableList<Station>>()
-                results.forEach { station ->
+                allResults.forEach { station ->
                     station.tags.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { tag ->
                         tagMap.getOrPut(tag) { mutableListOf() }.add(station)
                     }
                 }
                 
-                val bitrates = _selectedBitrates.value
                 _tagSearchGroups.value = tagMap.entries
                     .filter { it.key.contains(tagQuery, ignoreCase = true) }
                     .sortedByDescending { it.value.size }
@@ -1431,11 +1523,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             genreName = tag,
                             stations = stations,
                             totalStations = stations.size,
-                            filteredCount = stations.count { matchesBitrateFilter(it, bitrates) }
+                            filteredCount = stations.size
                         )
                     }
                 
-                applyFilters()
+                _hasMoreStations.value = false // We already fetched many
+                updateStations(allResults)
             } catch (e: Exception) {
                 _error.value = "Tag search failed"
             } finally {
@@ -1568,11 +1661,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun searchStations(query: String) {
         if (query.isEmpty()) return
+        _isLoading.value = true
+        _error.value = null
+        _stationOffset.value = 0
+        _hasMoreStations.value = true
+        
         viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
             try {
-                updateStations(repository.searchStations(query = query, hideBroken = _hideBrokenStations.value))
+                val results = repository.searchStations(query = query, hideBroken = _hideBrokenStations.value)
+                
+                val finalResults = if (_selectedBitrates.value.contains(BitrateFilter.FLAC)) {
+                    val flacResults = repository.searchStations(query = query, tag = "flac", hideBroken = _hideBrokenStations.value)
+                    (results + flacResults).distinctBy { it.stationUuid }
+                } else {
+                    results
+                }
+                
+                _hasMoreStations.value = finalResults.size >= 100
+                updateStations(finalResults)
             } catch (e: Exception) {
                 _error.value = "Search failed"
             } finally {

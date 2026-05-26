@@ -2,6 +2,15 @@ package com.toxa.pureradio
 
 import android.os.Bundle
 import android.net.Uri
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.graphics.drawable.Icon
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.util.Rational
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -48,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Favorite
@@ -58,6 +68,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicVideo
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Place
@@ -147,10 +158,22 @@ import java.util.Locale
 @OptIn(ExperimentalTvMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private val isInPipMode = mutableStateOf(false)
+
+    private val stopReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "ACTION_STOP_RADIO") {
+                viewModel.stopPlayback()
+                finish()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"), Context.RECEIVER_NOT_EXPORTED)
         setContent {
+            val isPip by isInPipMode
             val isInitialized by viewModel.isInitialized.collectAsState()
             var splashElapsed by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
@@ -169,11 +192,13 @@ class MainActivity : ComponentActivity() {
                         },
                     shape = RectangleShape,
                     colors = SurfaceDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.background
+                        containerColor = if (isPip) Color.Transparent else MaterialTheme.colorScheme.background
                     )
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (showSplash) {
+                        if (isPip) {
+                            PipContent(viewModel)
+                        } else if (showSplash) {
                             SplashScreen()
                         } else {
                             // Subtle background gradient
@@ -198,7 +223,159 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(stopReceiver) } catch (_: Exception) {}
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        updatePipParams()
+    }
+
+    private fun updatePipParams() {
+        if (viewModel.isPlaying.value) {
+            val station = viewModel.currentStation.value ?: return
+            val metadata = viewModel.mediaMetadata.value
+            
+            val stopIntent = PendingIntent.getBroadcast(
+                this,
+                1,
+                Intent("ACTION_STOP_RADIO"),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val stopAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                "Close",
+                "Stop Radio",
+                stopIntent
+            )
+            
+            val openIntent = PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            val openAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_menu_revert),
+                "Open",
+                "Open App",
+                openIntent
+            )
+
+            val builder = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(239, 100))
+                .setActions(listOf(openAction, stopAction))
+            
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                builder.setAutoEnterEnabled(true)
+            }
+            
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                val title = if (!metadata?.title.isNullOrEmpty()) metadata?.title.toString() else station.name
+                builder.setTitle(title)
+                builder.setSubtitle(station.name)
+            }
+
+            val params = builder.build()
+            setPictureInPictureParams(params)
+            
+            // For Android 14+ we call enterPictureInPictureMode manually if not auto-triggered
+            if (android.os.Build.VERSION.SDK_INT >= 34) {
+                 enterPictureInPictureMode(params)
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPipMode.value = isInPictureInPictureMode
+    }
 }
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun PipContent(viewModel: MainViewModel) {
+    val currentStation by viewModel.currentStation.collectAsState()
+    val mediaMetadata by viewModel.mediaMetadata.collectAsState()
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)),
+        contentAlignment = Alignment.Center
+    ) {
+        currentStation?.let { station ->
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(54.dp),
+                    colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.1f))
+                ) {
+                    AsyncImage(
+                        model = if (station.favicon.isNotEmpty()) station.favicon else R.drawable.ic_radio_logo,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().padding(6.dp),
+                        contentScale = ContentScale.Fit,
+                        error = coil.compose.rememberAsyncImagePainter(R.drawable.ic_radio_logo)
+                    )
+                }
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    val displayTitle = if (!mediaMetadata?.title.isNullOrEmpty()) {
+                        mediaMetadata?.title.toString()
+                    } else {
+                        station.name
+                    }
+                    Text(
+                        text = displayTitle,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = station.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.OpenInFull,
+                        contentDescription = "Open",
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun SplashScreen() {
@@ -596,14 +773,19 @@ fun MainScreen(viewModel: MainViewModel) {
                                             StationGrid(
                                                 stations = stations,
                                                 viewModel = viewModel,
-                                                onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                                onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                                 onLongClick = { stationToFavorite = it }
                                             )
                                         }
                                     }
                                 } else {
                                     key("home_top") {
-                                        StationGrid(stations, viewModel) { stationToFavorite = it }
+                                        StationGrid(
+                                            stations = stations,
+                                            viewModel = viewModel,
+                                            onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
+                                            onLongClick = { stationToFavorite = it }
+                                        )
                                     }
                                 }
                             }
@@ -612,7 +794,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     StationGrid(
                                         stations = stations,
                                         viewModel = viewModel,
-                                        onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                        onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                         onLongClick = { stationToFavorite = it }
                                     )
                                 }
@@ -671,7 +853,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                             modifier = Modifier.size(36.dp),
                                                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                                                 containerColor = Color.Transparent,
-                                                                contentColor = Color.Gray
+                                                                contentColor = Color.White
                                                             )
                                                         ) {
                                                             Text("X", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.bodySmall.fontSize)
@@ -722,7 +904,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         StationGrid(
                                             stations = stations,
                                             viewModel = viewModel,
-                                            onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                            onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                             onLongClick = { stationToFavorite = it }
                                         )
                                     }
@@ -738,7 +920,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         StationGrid(
                                             stations = stations,
                                             viewModel = viewModel,
-                                            onLoadMore = if (hasMoreStations) {{ viewModel.loadMoreStations() }} else null,
+                                            onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                             onLongClick = { stationToFavorite = it }
                                         )
                                     }
@@ -1378,6 +1560,7 @@ fun SettingsScreen(
     val screensaverMode by viewModel.screensaverMode.collectAsState()
     val audioPassthrough by viewModel.audioPassthrough.collectAsState()
     val genreSortMode by viewModel.genreSortMode.collectAsState()
+    val minTagFilter by viewModel.minTagFilter.collectAsState()
     val appTheme by viewModel.appTheme.collectAsState()
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
 
@@ -1651,6 +1834,7 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AppTheme") },
+                        modifier = Modifier.focusRequester(mainMenuFocusRequester),
                         headlineContent = { Text("Application Theme") },
                         supportingContent = {
                             val label = when (appTheme) {
@@ -1726,6 +1910,19 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.toggleMinTagFilter() },
+                        headlineContent = { Text("Min Tag Station Count") },
+                        supportingContent = { Text("Do not load tags with less than 101 stations") },
+                        leadingContent = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = minTagFilter, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
                         headlineContent = { Text("Background Synchronization") },
                         supportingContent = { 
@@ -1794,7 +1991,6 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
-                        modifier = Modifier.focusRequester(mainMenuFocusRequester),
                         headlineContent = { Text("Home Screen Curation") },
                         supportingContent = { Text("Choose which genres appear on your primary dashboard") },
                         leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
@@ -1869,6 +2065,8 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
     val searchMode by viewModel.searchMode.collectAsState()
     val tagSearchGroups by viewModel.tagSearchGroups.collectAsState()
     val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
+    val selectedBitrates by viewModel.selectedBitrates.collectAsState()
+    val hasMoreStations by viewModel.hasMoreStations.collectAsState()
     val searchFocusTrigger by viewModel.searchFocusTrigger.collectAsState()
     val searchFieldFocusRequester = remember { FocusRequester() }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -1888,11 +2086,6 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
         }
     }
 
-    LaunchedEffect(searchFocusTrigger) {
-        if (searchFocusTrigger > 0 && !isSearchFieldFocused) {
-            try { searchFieldFocusRequester.requestFocus() } catch (_: Exception) {}
-        }
-    }
     Column(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -1905,20 +2098,6 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                     .focusRequester(searchFieldFocusRequester)
                     .onFocusChanged { isSearchFieldFocused = it.isFocused },
                 singleLine = true,
-                trailingIcon = {
-                    if (localSearchQuery.isNotEmpty()) {
-                        androidx.tv.material3.Button(
-                            onClick = { viewModel.onSearchQueryChange(""); localSearchQuery = "" },
-                            modifier = Modifier.size(36.dp),
-                            colors = androidx.tv.material3.ButtonDefaults.colors(
-                                containerColor = Color.Transparent,
-                                contentColor = Color.Gray
-                            )
-                        ) {
-                            Text("X", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.bodySmall.fontSize)
-                        }
-                    }
-                },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(
                     onSearch = {
@@ -1955,6 +2134,12 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
         if (isLoading) {
             Text("Searching...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
         }
+
+        BitrateFilters(
+            selectedBitrates = selectedBitrates,
+            onToggleFilter = { viewModel.toggleBitrateFilter(it) }
+        )
+        Spacer(modifier = Modifier.height(8.dp))
         
         Box(modifier = Modifier.weight(1f)) {
             if (stations.isEmpty() && localSearchQuery.isEmpty() && tagSearchGroups.isEmpty()) {
@@ -1967,6 +2152,7 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                                     onClick = { 
                                         searchTriggered.intValue++
                                         viewModel.onSearchQueryChange(query) 
+                                        keyboardController?.hide()
                                     },
                                     modifier = Modifier.padding(end = 8.dp)
                                 ) {
@@ -1987,18 +2173,16 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Box(modifier = Modifier.weight(1f)) {
-                        key(searchTriggered.intValue) {
-                            GenreGroupGrid(
-                                groups = tagSearchGroups,
-                                autoFocus = isReturning || searchTriggered.intValue > 0,
-                                onGroupClick = { tagName ->
-                                    viewModel.selectSearchTag(tagName)
-                                },
-                                onGroupLongClick = { tagName ->
-                                    onTagGroupLongClick?.invoke(tagName)
-                                }
-                            )
-                        }
+                        GenreGroupGrid(
+                            groups = tagSearchGroups,
+                            autoFocus = isReturning,
+                            onGroupClick = { tagName ->
+                                viewModel.selectSearchTag(tagName)
+                            },
+                            onGroupLongClick = { tagName ->
+                                onTagGroupLongClick?.invoke(tagName)
+                            }
+                        )
                     }
                 }
             } else {
@@ -2019,9 +2203,13 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                         }
                     }
                     Box(modifier = Modifier.weight(1f)) {
-                        key(searchTriggered.intValue) {
-                            StationGrid(stations, viewModel, autoFocus = selectedSearchTag != null || searchTriggered.intValue > 0, onLongClick = onLongClick)
-                        }
+                        StationGrid(
+                            stations = stations, 
+                            viewModel = viewModel, 
+                            autoFocus = selectedSearchTag != null, 
+                            onLongClick = onLongClick,
+                            onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null
+                        )
                     }
                 }
             }
@@ -2051,7 +2239,7 @@ fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupC
                 GenreGroupCard(
                     group = group.copy(genreName = group.genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }),
                     onClick = { onGroupClick(group.genreName) },
-                    onLongClick = if (onGroupLongClick != null) {{ onGroupLongClick(group.genreName) }} else null,
+                    onLongClick = if (onGroupLongClick != null) { { onGroupLongClick(group.genreName) } } else null,
                     modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
                 )
             }
@@ -2108,11 +2296,7 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, onLongClick: (() -> U
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                val countText = if (group.filteredCount < group.stations.size) {
-                    "${group.filteredCount} / ${group.totalStations}"
-                } else {
-                    "${group.totalStations} stations"
-                }
+                val countText = "${group.filteredCount} / ${group.totalStations}"
                 Surface(
                     shape = MaterialTheme.shapes.extraSmall,
                     colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
@@ -2301,7 +2485,7 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
             itemsIndexed(tags, key = { _, tag -> tag.name }) { index, tag ->
                 Card(
                     onClick = { onTagClick(tag) },
-                    onLongClick = if (onTagLongClick != null) {{ onTagLongClick(tag) }} else null,
+                    onLongClick = if (onTagLongClick != null) { { onTagLongClick(tag) } } else null,
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)

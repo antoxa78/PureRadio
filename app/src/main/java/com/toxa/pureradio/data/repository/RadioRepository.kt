@@ -41,31 +41,29 @@ class RadioRepository {
                 hideBroken = hideBroken
             )
             
-            if (results.size < 10) {
-                if (query != null && tag == null) {
-                    val byTag = service.searchStations(
-                        tag = query,
-                        country = country,
-                        limit = limit,
-                        offset = offset,
-                        hideBroken = hideBroken
-                    )
-                    (results + byTag).distinctBy { it.stationUuid }
-                } else if (tag != null && query == null) {
-                    val byName = service.searchStations(
-                        name = tag,
-                        country = country,
-                        limit = limit,
-                        offset = offset,
-                        hideBroken = hideBroken
-                    )
-                    (results + byName).distinctBy { it.stationUuid }
-                } else {
-                    results
-                }
+            val combined = if (query != null && tag == null) {
+                val byTag = service.searchStations(
+                    tag = query,
+                    country = country,
+                    limit = limit,
+                    offset = offset,
+                    hideBroken = hideBroken
+                )
+                (results + byTag).distinctBy { it.stationUuid }
+            } else if (tag != null && query == null) {
+                val byName = service.searchStations(
+                    name = tag,
+                    country = country,
+                    limit = limit,
+                    offset = offset,
+                    hideBroken = hideBroken
+                )
+                (results + byName).distinctBy { it.stationUuid }
             } else {
                 results
             }
+            
+            combined
         } catch (e: Exception) {
             emptyList()
         }
