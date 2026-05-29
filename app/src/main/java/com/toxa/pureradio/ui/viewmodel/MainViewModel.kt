@@ -63,7 +63,7 @@ enum class SearchMode {
     Name, Tag
 }
 
-enum class AppTheme {
+    enum class AppTheme {
     RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast
 }
 
@@ -106,7 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _genreSortMode = MutableStateFlow(GenreSortMode.Count)
     val genreSortMode: StateFlow<GenreSortMode> = _genreSortMode
 
-    private val _minTagFilter = MutableStateFlow(prefs.getBoolean("min_tag_filter", false))
+    private val _minTagFilter = MutableStateFlow(prefs.getBoolean("min_tag_filter", true))
     val minTagFilter: StateFlow<Boolean> = _minTagFilter
 
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
@@ -207,6 +207,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _pendingImportStations = MutableStateFlow<List<Station>?>(null)
     val pendingImportStations: StateFlow<List<Station>?> = _pendingImportStations
+
+    private val _pendingOverwriteFile = MutableStateFlow<File?>(null)
+    val pendingOverwriteFile: StateFlow<File?> = _pendingOverwriteFile
 
     private val _filePickerState = MutableStateFlow<FilePickerState?>(null)
     val filePickerState: StateFlow<FilePickerState?> = _filePickerState
@@ -403,6 +406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     data class FilePickerState(
         val currentPath: String,
+        val rootPath: String,
         val files: List<File>,
         val isExport: Boolean,
         val suggestedFileName: String = ""
@@ -410,20 +414,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openFilePicker(isExport: Boolean, suggestedFileName: String = "") {
         val root = Environment.getExternalStorageDirectory() ?: File("/")
-        // If we are in the root, also try to find 'Download' folder which is most common on TV
-        val initialDir = if (!isExport) {
-            val downloadDir = File(root, "Download")
-            if (downloadDir.exists() && downloadDir.isDirectory) downloadDir else root
-        } else {
-            root
-        }
+        val musicDir = File(root, "Music")
+        if (!musicDir.exists()) musicDir.mkdirs()
+        val initialDir = if (musicDir.exists() && musicDir.isDirectory) musicDir else root
         
         _filePickerState.value = FilePickerState(
             currentPath = initialDir.absolutePath,
+            rootPath = root.absolutePath,
             files = listFiles(initialDir),
             isExport = isExport,
             suggestedFileName = suggestedFileName
         )
+    }
+
+    fun getTimestampedBackupFileName(): String {
+        val now = java.util.Date()
+        val format = java.text.SimpleDateFormat("dd_MMM_yyyy_HH.mm", java.util.Locale.US)
+        return "favourites ${format.format(now).lowercase()}.m3u"
     }
 
     fun closeFilePicker() {
@@ -441,6 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun navigateUpFilePicker() {
         val currentState = _filePickerState.value ?: return
         val currentFile = File(currentState.currentPath)
+        if (currentFile.absolutePath == currentState.rootPath) return
         val parent = currentFile.parentFile ?: return
         _filePickerState.value = currentState.copy(
             currentPath = parent.absolutePath,
@@ -454,7 +462,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _error.value = "Permission Denied: Cannot access ${directory.name}. Ensure storage permissions are granted in System Settings."
             return emptyList()
         }
-        return files.toList().sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        return files.toList()
+            .filter { !it.name.startsWith(".") }
+            .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
     }
 
     fun handleFileSelection(file: File) {
@@ -465,8 +475,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 file
             }
-            saveFavoritesToFile(targetFile)
-            closeFilePicker()
+            if (targetFile.exists()) {
+                _pendingOverwriteFile.value = targetFile
+            } else {
+                saveFavoritesToFile(targetFile)
+                closeFilePicker()
+            }
         } else {
             if (!file.isDirectory) {
                 prepareImportFavoritesFromFile(file)
@@ -511,6 +525,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelRestore() {
         _pendingImportStations.value = null
+    }
+
+    fun confirmOverwrite() {
+        val file = _pendingOverwriteFile.value ?: return
+        _pendingOverwriteFile.value = null
+        saveFavoritesToFile(file)
+        closeFilePicker()
+    }
+
+    fun cancelOverwrite() {
+        _pendingOverwriteFile.value = null
     }
 
     private fun saveFavoritesToFile(file: File) {
@@ -691,7 +716,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_selectedNavItem.value == NavigationItem.Favourites) {
             _stations.value = currentStationList
         }
-        refreshFavoriteStations()
     }
 
     private fun startPlaybackTimer() {
@@ -1235,13 +1259,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val updatedStations = repository.getStationsByUuid(uuids)
                 if (updatedStations.isNotEmpty()) {
-                    _favoriteStations.value = updatedStations
-                    saveFavoritesToPrefs(_favorites.value, updatedStations)
+                    val existingStations = _favoriteStations.value
+                    val updatedUuids = updatedStations.map { it.stationUuid }.toSet()
+                    val merged = existingStations.filter { it.stationUuid !in updatedUuids } + updatedStations
+                    _favoriteStations.value = merged
+                    saveFavoritesToPrefs(_favorites.value, merged)
                     if (_selectedNavItem.value == NavigationItem.Favourites) {
-                        _stations.value = updatedStations
+                        _stations.value = merged
                     }
                     _currentStation.value?.let { current ->
-                        updatedStations.find { it.stationUuid == current.stationUuid }?.let {
+                        merged.find { it.stationUuid == current.stationUuid }?.let {
                             if (it.countryCode != current.countryCode) {
                                 _currentStation.value = it
                             }

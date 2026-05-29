@@ -494,6 +494,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val audioFormat by viewModel.audioFormat.collectAsState()
     val filePickerState by viewModel.filePickerState.collectAsState()
     val pendingImportStations by viewModel.pendingImportStations.collectAsState()
+    val pendingOverwriteFile by viewModel.pendingOverwriteFile.collectAsState()
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
@@ -568,6 +569,7 @@ fun MainScreen(viewModel: MainViewModel) {
         } else {
             when {
                 pendingImportStations != null -> viewModel.cancelRestore()
+                pendingOverwriteFile != null -> viewModel.cancelOverwrite()
                 filePickerState != null -> viewModel.closeFilePicker()
                 settingsSubMenu != null -> viewModel.setSettingsSubMenu(null)
                 selectedTag != null -> viewModel.selectTag(null)
@@ -938,11 +940,12 @@ fun MainScreen(viewModel: MainViewModel) {
                                         }
                                     },
                                     onExportPlaylist = { 
+                                        val fileName = viewModel.getTimestampedBackupFileName()
                                         try {
-                                            exportLauncher.launch("pure_radio_favorites.m3u") 
+                                            exportLauncher.launch(fileName) 
                                         } catch (e: Exception) {
                                             viewModel.setError("System picker unavailable. Using Internal Explorer.")
-                                            viewModel.openFilePicker(isExport = true, suggestedFileName = "pure_radio_favorites.m3u")
+                                            viewModel.openFilePicker(isExport = true, suggestedFileName = fileName)
                                         }
                                     },
                                     onPermissionRequest = {
@@ -1039,6 +1042,54 @@ fun MainScreen(viewModel: MainViewModel) {
             onSelected = { viewModel.handleFileSelection(it) },
             onDismiss = { viewModel.closeFilePicker() }
         )
+    }
+
+    pendingOverwriteFile?.let { file ->
+        val overwriteFocusRequester = remember { FocusRequester() }
+        Dialog(onDismissRequest = { viewModel.cancelOverwrite() }) {
+            Surface(
+                modifier = Modifier.width(420.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = SurfaceDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    shape = MaterialTheme.shapes.extraLarge
+                )
+            ) {
+                Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text("Overwrite Backup File?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "File \"${file.name}\" already exists. Overwrite it?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Button(
+                            onClick = { viewModel.cancelOverwrite() },
+                            modifier = Modifier.weight(1f).focusRequester(overwriteFocusRequester)
+                        ) {
+                            Text("No", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        Button(
+                            onClick = { viewModel.confirmOverwrite() },
+                            modifier = Modifier.weight(1f),
+                            colors = androidx.tv.material3.ButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Yes", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                    }
+                    LaunchedEffect(Unit) {
+                        try { overwriteFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
     }
 
     stationToFavorite?.let { station ->
@@ -1944,7 +1995,7 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { 
-                            viewModel.openFilePicker(isExport = true, suggestedFileName = "pure_radio_favorites.m3u")
+                            viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
                         },
                         headlineContent = { Text("Backup Favourites") },
                         supportingContent = { Text("Export your collection using the built-in file manager") },
@@ -2993,14 +3044,16 @@ fun FilePicker(
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    item {
-                        ListItem(
-                            selected = false,
-                            onClick = onNavigateUp,
-                            headlineContent = { Text("..", fontWeight = FontWeight.Bold) },
-                            supportingContent = { Text("Go to Parent Directory") },
-                            leadingContent = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = folderIconColor) }
-                        )
+                    if (state.currentPath != state.rootPath) {
+                        item {
+                            ListItem(
+                                selected = false,
+                                onClick = onNavigateUp,
+                                headlineContent = { Text("..", fontWeight = FontWeight.Bold) },
+                                supportingContent = { Text("Go to Parent Directory") },
+                                leadingContent = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = folderIconColor) }
+                            )
+                        }
                     }
                     
                     items(state.files) { file ->

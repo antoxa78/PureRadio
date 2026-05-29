@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - 2026-05-29
+
+### Changed
+- Placeholder for v1.2.2 changes.
+
 ## [1.2.0] - 2025-01-31
 
 ### Added
