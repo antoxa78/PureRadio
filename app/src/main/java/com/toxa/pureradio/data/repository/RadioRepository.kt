@@ -2,22 +2,40 @@ package com.toxa.pureradio.data.repository
 
 import com.toxa.pureradio.data.model.Station
 import com.toxa.pureradio.network.Country
+import com.toxa.pureradio.network.RadioBrowserDiscovery
 import com.toxa.pureradio.network.RadioBrowserService
+import com.toxa.pureradio.network.ServerStats
 import com.toxa.pureradio.network.Tag
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 class RadioRepository {
-    private val retrofit = Retrofit.Builder()
-        .baseUrl("https://de1.api.radio-browser.info/") // Using one of the mirrors
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
+    private var _service: RadioBrowserService? = null
+    private val mutex = Mutex()
 
-    private val service = retrofit.create(RadioBrowserService::class.java)
+    private suspend fun getService(): RadioBrowserService {
+        val currentService = _service
+        if (currentService != null) return currentService
+        
+        return mutex.withLock {
+            _service ?: run {
+                val baseUrl = RadioBrowserDiscovery.getBaseUrl()
+                val retrofit = Retrofit.Builder()
+                    .baseUrl(baseUrl)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                val newService = retrofit.create(RadioBrowserService::class.java)
+                _service = newService
+                newService
+            }
+        }
+    }
 
     suspend fun getTopStations(limit: Int = 100, hideBroken: Boolean = false): List<Station> {
         return try {
-            service.getTopStations(limit = limit, hideBroken = hideBroken)
+            getService().getTopStations(limit = limit, hideBroken = hideBroken)
         } catch (e: Exception) {
             emptyList()
         }
@@ -32,6 +50,7 @@ class RadioRepository {
         hideBroken: Boolean = false
     ): List<Station> {
         return try {
+            val service = getService()
             val results = service.searchStations(
                 name = query,
                 tag = tag,
@@ -69,9 +88,9 @@ class RadioRepository {
         }
     }
 
-    suspend fun getStats(): com.toxa.pureradio.network.ServerStats? {
+    suspend fun getStats(): ServerStats? {
         return try {
-            service.getStats()
+            getService().getStats()
         } catch (e: Exception) {
             null
         }
@@ -79,7 +98,7 @@ class RadioRepository {
 
     suspend fun getTags(limit: Int = 500): List<Tag> {
         return try {
-            service.getTags(limit = limit)
+            getService().getTags(limit = limit)
         } catch (e: Exception) {
             emptyList()
         }
@@ -87,7 +106,7 @@ class RadioRepository {
 
     suspend fun getCountries(): List<Country> {
         return try {
-            service.getCountries()
+            getService().getCountries()
         } catch (e: Exception) {
             emptyList()
         }
@@ -95,7 +114,7 @@ class RadioRepository {
 
     suspend fun getStationsByUuid(uuids: String): List<Station> {
         return try {
-            service.getStationsByUuid(uuids)
+            getService().getStationsByUuid(uuids)
         } catch (e: Exception) {
             emptyList()
         }

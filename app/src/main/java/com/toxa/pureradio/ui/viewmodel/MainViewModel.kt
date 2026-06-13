@@ -16,12 +16,14 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import com.toxa.pureradio.data.model.Station
 import com.toxa.pureradio.data.repository.RadioRepository
 import com.toxa.pureradio.network.Country
+import com.toxa.pureradio.network.ServerStats
 import com.toxa.pureradio.network.Tag
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,8 +184,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _settingsSubMenu = MutableStateFlow<String?>(null)
     val settingsSubMenu: StateFlow<String?> = _settingsSubMenu
 
-    private val _serverStats = MutableStateFlow<com.toxa.pureradio.network.ServerStats?>(null)
-    val serverStats: StateFlow<com.toxa.pureradio.network.ServerStats?> = _serverStats
+    private val _serverStats = MutableStateFlow<ServerStats?>(null)
+    val serverStats: StateFlow<ServerStats?> = _serverStats
 
     private val _lastDbUpdate = MutableStateFlow<Long>(prefs.getLong("last_db_update", 0))
     val lastDbUpdate: StateFlow<Long> = _lastDbUpdate
@@ -232,15 +234,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _quitConfirmationEnabled = MutableStateFlow(prefs.getBoolean("quit_confirmation", true))
     val quitConfirmationEnabled: StateFlow<Boolean> = _quitConfirmationEnabled
 
+    private val _defaultCategory = MutableStateFlow(loadDefaultCategory())
+    val defaultCategory: StateFlow<NavigationItem> = _defaultCategory
+
+    private val _autoReconnectEnabled = MutableStateFlow(prefs.getBoolean("auto_reconnect", true))
+    val autoReconnectEnabled: StateFlow<Boolean> = _autoReconnectEnabled
+
+    private val _extraBufferingEnabled = MutableStateFlow(prefs.getBoolean("extra_buffering", false))
+    val extraBufferingEnabled: StateFlow<Boolean> = _extraBufferingEnabled
+
     private var lastInteractionTime = System.currentTimeMillis()
     private var consecutiveErrors = 0
+    private var stationRetryCount = 0
+    private var retryJob: kotlinx.coroutines.Job? = null
     private var searchJob: kotlinx.coroutines.Job? = null
 
     init {
         initializePlayer()
         loadTags()
         loadStats()
-        selectNavigationItem(NavigationItem.Home, force = true)
+        selectNavigationItem(_defaultCategory.value, force = true)
         startPlaybackTimer()
         startScreensaverTimer()
         checkAutoUpdate()
@@ -269,8 +282,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
 
+        val loadControl = if (_extraBufferingEnabled.value) {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    30000, // Min buffer 30s
+                    60000, // Max buffer 60s
+                    8000,  // Buffer for playback 8s
+                    12000  // Buffer for playback after rebuffer 12s
+                ).build()
+        } else {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    15000, // Min buffer 15s
+                    50000, // Max buffer 50s
+                    2500,  // Buffer for playback 2.5s
+                    5000   // Buffer for playback after rebuffer 5s
+                ).build()
+        }
+
         val builder = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
         
         if (_audioPassthrough.value) {
             val renderersFactory = DefaultRenderersFactory(getApplication())
@@ -289,13 +321,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playbackParameters = androidx.media3.common.PlaybackParameters.DEFAULT
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
-                    consecutiveErrors++
-                    if (consecutiveErrors < 5) {
-                        playNext(isAuto = true)
+                    val station = _currentStation.value
+                    if (_autoReconnectEnabled.value && station != null && stationRetryCount < 3) {
+                        stationRetryCount++
+                        _error.value = "Connection lost. Retrying in 5s... ($stationRetryCount/3)"
+                        _isPlaying.value = false
+                        retryJob?.cancel()
+                        retryJob = viewModelScope.launch {
+                            delay(5000)
+                            playStation(station, resetErrors = false)
+                        }
                     } else {
-                        _error.value = "Playback failed: ${error.message}"
-                        stopPlayback()
-                        consecutiveErrors = 0
+                        consecutiveErrors++
+                        stationRetryCount = 0
+                        if (consecutiveErrors < 5) {
+                            playNext(isAuto = true)
+                        } else {
+                            _error.value = "Playback failed: ${error.message}"
+                            stopPlayback()
+                            consecutiveErrors = 0
+                        }
                     }
                 }
 
@@ -840,14 +885,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return try { AppTheme.valueOf(name) } catch (e: Exception) { AppTheme.RetroGold }
     }
 
+    private fun loadDefaultCategory(): NavigationItem {
+        val name = prefs.getString("default_category", NavigationItem.Home.name) ?: NavigationItem.Home.name
+        return try { NavigationItem.valueOf(name) } catch (e: Exception) { NavigationItem.Home }
+    }
+
     fun setAppTheme(theme: AppTheme) {
         _appTheme.value = theme
         prefs.edit().putString("app_theme", theme.name).apply()
     }
 
+    fun setDefaultCategory(item: NavigationItem) {
+        _defaultCategory.value = item
+        prefs.edit().putString("default_category", item.name).apply()
+    }
+
     fun setQuitConfirmationEnabled(enabled: Boolean) {
         _quitConfirmationEnabled.value = enabled
         prefs.edit().putBoolean("quit_confirmation", enabled).apply()
+    }
+
+    fun setAutoReconnectEnabled(enabled: Boolean) {
+        _autoReconnectEnabled.value = enabled
+        prefs.edit().putBoolean("auto_reconnect", enabled).apply()
+        if (!enabled) retryJob?.cancel()
+    }
+
+    fun setExtraBufferingEnabled(enabled: Boolean) {
+        _extraBufferingEnabled.value = enabled
+        prefs.edit().putBoolean("extra_buffering", enabled).apply()
+        reinitializePlayer()
     }
 
     private fun loadRecentsFromPrefs(): List<Station> {
@@ -1565,7 +1632,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playStation(station: Station, resetErrors: Boolean = true) {
-        if (resetErrors) consecutiveErrors = 0
+        if (resetErrors) {
+            consecutiveErrors = 0
+            stationRetryCount = 0
+        }
+        if (station.stationUuid != _currentStation.value?.stationUuid) {
+            stationRetryCount = 0
+        }
+        retryJob?.cancel()
         _isLoading.value = false
         var finalStation = station
         if (finalStation.countryCode.isNullOrEmpty()) {
@@ -1669,6 +1743,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
+        retryJob?.cancel()
         player?.let {
             if (it.isPlaying) {
                 it.pause()
@@ -1681,6 +1756,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopPlayback() {
+        retryJob?.cancel()
         player?.stop()
         _isPlaying.value = false
         _currentStation.value = null

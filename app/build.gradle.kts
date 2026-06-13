@@ -15,8 +15,8 @@ android {
         applicationId = "com.toxa.pureradio"
         minSdk = 28
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.2.2"
+        versionCode = 7
+        versionName = "1.3.0"
 
         buildConfigField("Long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }
@@ -45,7 +45,7 @@ android {
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("PureRadio-v${android.defaultConfig.versionName}SDK${android.defaultConfig.minSdk}.apk")
+            output.outputFileName.set("PureRadio-v${android.defaultConfig.versionName}.apk")
         }
     }
 }

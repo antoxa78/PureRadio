@@ -144,6 +144,7 @@ import coil.compose.AsyncImage
 import com.toxa.pureradio.R
 import com.toxa.pureradio.data.model.Station
 import com.toxa.pureradio.network.Country
+import com.toxa.pureradio.network.ServerStats
 import com.toxa.pureradio.network.Tag
 import com.toxa.pureradio.ui.theme.PureRadioTheme
 import com.toxa.pureradio.ui.viewmodel.BitrateFilter
@@ -754,11 +755,11 @@ fun MainScreen(viewModel: MainViewModel) {
                                                     val group = genreGroups.find { it.genreName == name }
                                                     if (group?.isCountry == true) {
                                                         val country = countries.find { it.name == name }
-                                                            ?: com.toxa.pureradio.network.Country(name = name, iso_3166_1 = "", stationcount = 0)
+                                                            ?: Country(name = name, iso_3166_1 = "", stationcount = 0)
                                                         viewModel.selectCountry(country)
                                                     } else {
                                                         val tag = tags.find { it.name == name }
-                                                            ?: com.toxa.pureradio.network.Tag(name = name, stationcount = group?.totalStations ?: 0)
+                                                            ?: Tag(name = name, stationcount = group?.totalStations ?: 0)
                                                         viewModel.selectTag(tag)
                                                     }
                                                 },
@@ -820,7 +821,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             genreToRemove = tagName
                                         } else {
                                             genreToAdd = tags.find { it.name.equals(tagName, ignoreCase = true) }
-                                                ?: com.toxa.pureradio.network.Tag(name = tagName, stationcount = 0)
+                                                ?: Tag(name = tagName, stationcount = 0)
                                         }
                                     }
                                 )
@@ -1614,6 +1615,9 @@ fun SettingsScreen(
     val minTagFilter by viewModel.minTagFilter.collectAsState()
     val appTheme by viewModel.appTheme.collectAsState()
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
+    val autoReconnectEnabled by viewModel.autoReconnectEnabled.collectAsState()
+    val extraBufferingEnabled by viewModel.extraBufferingEnabled.collectAsState()
+    val defaultCategory by viewModel.defaultCategory.collectAsState()
 
     val subMenuFocusRequester = remember { FocusRequester() }
     val mainMenuFocusRequester = remember { FocusRequester() }
@@ -1871,6 +1875,42 @@ fun SettingsScreen(
                 }
             }
         }
+        "DefaultCategory" -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Startup Category", style = MaterialTheme.typography.headlineMedium)
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+                val categories = NavigationItem.entries.filter { it != NavigationItem.Settings && it != NavigationItem.Exit }
+                items(categories) { item ->
+                    ListItem(
+                        selected = defaultCategory == item,
+                        onClick = { 
+                            viewModel.setDefaultCategory(item)
+                            viewModel.setSettingsSubMenu(null)
+                        },
+                        headlineContent = { Text(item.name) },
+                        trailingContent = {
+                            if (defaultCategory == item) {
+                                Icon(Icons.Default.Home, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    )
+                }
+            }
+        }
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -1906,12 +1946,49 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("DefaultCategory") },
+                        headlineContent = { Text("Startup Category") },
+                        supportingContent = { Text("Currently: ${defaultCategory.name}") },
+                        leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.setQuitConfirmationEnabled(!quitConfirmationEnabled) },
                         headlineContent = { Text("Quit Confirmation") },
                         supportingContent = { Text("Ask before exiting the application") },
                         leadingContent = { Icon(Icons.Default.Warning, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = quitConfirmationEnabled, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setAutoReconnectEnabled(!autoReconnectEnabled) },
+                        headlineContent = { Text("Auto Reconnect") },
+                        supportingContent = { Text("Attempt to reconnect if the stream is interrupted") },
+                        leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = autoReconnectEnabled, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setExtraBufferingEnabled(!extraBufferingEnabled) },
+                        headlineContent = { Text("Extra Buffering") },
+                        supportingContent = { Text("Increase buffer size for unstable connections (increases start time)") },
+                        leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = extraBufferingEnabled, onCheckedChange = null)
                         }
                     )
                 }
