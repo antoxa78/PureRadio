@@ -12,14 +12,16 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 class RadioRepository {
+    @Volatile
     private var _service: RadioBrowserService? = null
     private val mutex = Mutex()
 
     private suspend fun getService(): RadioBrowserService {
-        val currentService = _service
-        if (currentService != null) return currentService
-        
+        // Fast path: no lock needed if already initialized
+        _service?.let { return it }
+
         return mutex.withLock {
+            // Re-check inside lock in case another coroutine initialized it first
             _service ?: run {
                 val baseUrl = RadioBrowserDiscovery.getBaseUrl()
                 val retrofit = Retrofit.Builder()

@@ -65,7 +65,7 @@ enum class SearchMode {
     Name, Tag
 }
 
-    enum class AppTheme {
+enum class AppTheme {
     RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast
 }
 
@@ -101,6 +101,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
+
+    private val _successMessage = MutableStateFlow<String?>(null)
+    val successMessage: StateFlow<String?> = _successMessage
 
     private val _selectedNavItem = MutableStateFlow(NavigationItem.Home)
     val selectedNavItem: StateFlow<NavigationItem> = _selectedNavItem
@@ -376,15 +379,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val wasPlaying = _isPlaying.value
         val currentPos = player?.currentPosition ?: 0L
         val currentItem = player?.currentMediaItem
-        
+
         player?.release()
+        player = null
         initializePlayer()
-        
-        currentItem?.let {
-            player?.setMediaItem(it)
+
+        if (currentItem != null) {
+            player?.setMediaItem(currentItem)
             player?.seekTo(currentPos)
             player?.prepare()
-            if (wasPlaying) player?.play()
+            if (wasPlaying) {
+                player?.play()
+                _isPlaying.value = true
+            } else {
+                _isPlaying.value = false
+            }
+        } else {
+            _isPlaying.value = false
         }
     }
 
@@ -588,7 +599,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val content = generateM3uContent()
                 file.writeText(content)
-                _error.value = "Favorites exported to ${file.name}"
+                _successMessage.value = "Favourites exported to ${file.name}"
             } catch (e: Exception) {
                 _error.value = "Export failed: ${e.message}"
             }
@@ -689,8 +700,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when {
                 trimmedLine.startsWith("#EXT-X-PURE-RADIO-DATA:") -> {
                     val data = trimmedLine.removePrefix("#EXT-X-PURE-RADIO-DATA:").split(";")
-                    val map = data.associate { 
-                        val parts = it.split("=")
+                    val map = data.associate {
+                        val parts = it.split("=", limit = 2)   // limit=2 preserves = inside URLs/values
                         if (parts.size == 2) parts[0] to parts[1] else "" to ""
                     }
                     currentUuid = map["uuid"] ?: ""
@@ -967,6 +978,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
     }
 
+    fun setSuccess(message: String) {
+        _successMessage.value = message
+    }
+
+    fun clearSuccess() {
+        _successMessage.value = null
+    }
+
     fun setGenreSortMode(mode: GenreSortMode) {
         _genreSortMode.value = mode
     }
@@ -1109,7 +1128,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun applyFilters() {
         val bitrates = _selectedBitrates.value
         _stations.value = _allStations.value.filter { matchesBitrateFilter(it, bitrates) }
-        
+
         _genreGroups.value = _genreGroups.value.map { group ->
             group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
         }
@@ -1118,7 +1137,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
         }
 
-        if (!_isLoading.value && _stations.value.size < 100 && _hasMoreStations.value) {
+        // Only auto-load more for sections that support server-side pagination.
+        // Favourites and Recent are local lists — no API pagination needed.
+        val supportsPagination = when (_selectedNavItem.value) {
+            NavigationItem.Home, NavigationItem.Popular, NavigationItem.Genres,
+            NavigationItem.Countries, NavigationItem.Search -> true
+            else -> false
+        }
+        if (supportsPagination && !_isLoading.value && _stations.value.size < 100 && _hasMoreStations.value) {
             loadMoreStations(5)
         }
     }
@@ -1401,11 +1427,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val context = getApplication() as Context
                 val content = generateM3uContent()
-                
+
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(content.toByteArray())
                 }
-                _error.value = "Favorites exported successfully"
+                _successMessage.value = "Favourites exported successfully"
             } catch (e: Exception) {
                 _error.value = "Export failed: ${e.message}"
             }
@@ -1426,8 +1452,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (importedStations.isNotEmpty()) {
                     mergeImportedStations(importedStations)
-                    _error.value = "Imported ${importedStations.size} stations"
-                    refreshFavoriteStations() // Sync with server data if possible
+                    _successMessage.value = "Imported ${importedStations.size} stations"
+                    refreshFavoriteStations()
                 } else {
                     _error.value = "No stations found in file"
                 }

@@ -107,7 +107,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
@@ -455,7 +454,7 @@ fun SplashScreen() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Thousands of stations, free",
+                text = "Thousands of stations, for free",
                 style = MaterialTheme.typography.bodyMedium,
                 color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
                 modifier = Modifier.graphicsLayer { alpha = subAlpha.value }
@@ -478,6 +477,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val isInitialized by viewModel.isInitialized.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val successMessage by viewModel.successMessage.collectAsState()
     val selectedTag by viewModel.selectedTag.collectAsState()
     val selectedCountry by viewModel.selectedCountry.collectAsState()
     val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
@@ -543,6 +543,13 @@ fun MainScreen(viewModel: MainViewModel) {
         if (error != null) {
             delay(5000)
             viewModel.clearError()
+        }
+    }
+
+    LaunchedEffect(successMessage) {
+        if (successMessage != null) {
+            delay(4000)
+            viewModel.clearSuccess()
         }
     }
 
@@ -671,9 +678,20 @@ fun MainScreen(viewModel: MainViewModel) {
                                 )
                             }
                         ) {
+                            val label = when (item) {
+                                NavigationItem.Home -> "Home"
+                                NavigationItem.Popular -> "Popular"
+                                NavigationItem.Recent -> "Recent"
+                                NavigationItem.Search -> "Search"
+                                NavigationItem.Genres -> "Genres"
+                                NavigationItem.Countries -> "Countries"
+                                NavigationItem.Favourites -> "Favourites"
+                                NavigationItem.Settings -> "Settings"
+                                NavigationItem.Exit -> "Exit"
+                            }
                             Text(
-                                item.name, 
-                                maxLines = 1, 
+                                label,
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelLarge
                             )
@@ -693,7 +711,17 @@ fun MainScreen(viewModel: MainViewModel) {
                         val name = selectedCountry!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
                         "$name (${stations.size} Stations)"
                     }
-                    else -> selectedNavItem.name
+                    else -> when (selectedNavItem) {
+                        NavigationItem.Home -> "Home"
+                        NavigationItem.Popular -> "Popular"
+                        NavigationItem.Recent -> "Recent"
+                        NavigationItem.Search -> "Search"
+                        NavigationItem.Genres -> "Genres"
+                        NavigationItem.Countries -> "Countries"
+                        NavigationItem.Favourites -> "Favourites"
+                        NavigationItem.Settings -> "Settings"
+                        NavigationItem.Exit -> "Exit"
+                    }
                 }
                 val isDeepDive = selectedTag != null || selectedCountry != null
                 
@@ -741,8 +769,27 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (error != null) {
-                        Text(text = error!!, style = MaterialTheme.typography.headlineMedium)
+                    if (error != null || successMessage != null) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            error?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                )
+                            }
+                            successMessage?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                )
+                            }
+                        }
                     } else {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
@@ -965,7 +1012,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                     } catch (e2: Exception) {}
                                                 }
                                             } else {
-                                                viewModel.setError("All Files Access already granted")
+                                                viewModel.setSuccess("All Files Access already granted")
                                             }
                                         } else {
                                             permissionLauncher.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -980,21 +1027,13 @@ fun MainScreen(viewModel: MainViewModel) {
                     if (isLoading && selectedNavItem != NavigationItem.Search) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                            contentAlignment = Alignment.TopCenter
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                LinearProgressIndicator(
-                                    modifier = Modifier.width(200.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Searching for waves...", 
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                                )
-                            }
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.Transparent
+                            )
                         }
                     }
                 }
@@ -2348,11 +2387,9 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
 @Composable
 fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit, onGroupLongClick: ((String) -> Unit)? = null) {
     val focusRequester = remember { FocusRequester() }
-    val hasFocused = remember { mutableStateOf(false) }
     LaunchedEffect(autoFocus, groups.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
-            if (groups.isNotEmpty()) hasFocused.value = true
         }
     }
     if (groups.isEmpty()) {
@@ -2518,12 +2555,10 @@ fun StationGrid(
     val focusRequester = remember { FocusRequester() }
     val loadMoreFocusRequester = remember { FocusRequester() }
     var loadMoreCount by remember { mutableIntStateOf(0) }
-    val hasFocused = remember { mutableStateOf(false) }
     
     LaunchedEffect(autoFocus, stations.isNotEmpty()) {
         if (autoFocus && loadMoreCount == 0) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
-            if (stations.isNotEmpty()) hasFocused.value = true
         }
     }
 
@@ -2595,11 +2630,9 @@ fun StationGrid(
 @Composable
 fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit, onTagLongClick: ((Tag) -> Unit)? = null) {
     val focusRequester = remember { FocusRequester() }
-    val hasFocused = remember { mutableStateOf(false) }
     LaunchedEffect(autoFocus, tags.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
-            if (tags.isNotEmpty()) hasFocused.value = true
         }
     }
     if (tags.isEmpty()) {
@@ -2681,11 +2714,9 @@ fun CountryGrid(
     onCountryClick: (Country) -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
-    val hasFocused = remember { mutableStateOf(false) }
     LaunchedEffect(autoFocus, countries.isNotEmpty()) {
         if (autoFocus) {
             try { focusRequester.requestFocus() } catch (e: Exception) {}
-            if (countries.isNotEmpty()) hasFocused.value = true
         }
     }
     if (countries.isEmpty()) {
