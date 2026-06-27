@@ -711,8 +711,9 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             }
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                val title = when {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    val title = when {
                     selectedTag != null -> {
                         val name = selectedTag!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
                         "$name (${stations.size} Stations)"
@@ -779,28 +780,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (error != null || successMessage != null) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            error?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 32.dp)
-                                )
-                            }
-                            successMessage?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 32.dp)
-                                )
-                            }
-                        }
-                    } else {
+                    if (error == null && successMessage == null) {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
                                 if (genreGroups.isNotEmpty()) {
@@ -809,15 +789,17 @@ fun MainScreen(viewModel: MainViewModel) {
                                             GenreGroupGrid(
                                                 groups = genreGroups,
                                                 onGroupClick = { name ->
-                                                    val group = genreGroups.find { it.genreName == name }
-                                                    if (group?.isCountry == true) {
-                                                        val country = countries.find { it.name == name }
-                                                            ?: Country(name = name, iso_3166_1 = "", stationcount = 0)
-                                                        viewModel.selectCountry(country)
-                                                    } else {
-                                                        val tag = tags.find { it.name == name }
-                                                            ?: Tag(name = name, stationcount = group?.totalStations ?: 0)
-                                                        viewModel.selectTag(tag)
+                                                    if (genreToAdd == null && genreToRemove == null && stationToFavorite == null) {
+                                                        val group = genreGroups.find { it.genreName == name }
+                                                        if (group?.isCountry == true) {
+                                                            val country = countries.find { it.name == name }
+                                                                ?: Country(name = name, iso_3166_1 = "", stationcount = 0)
+                                                            viewModel.selectCountry(country)
+                                                        } else {
+                                                            val tag = tags.find { it.name == name }
+                                                                ?: Tag(name = name, stationcount = group?.totalStations ?: 0)
+                                                            viewModel.selectTag(tag)
+                                                        }
                                                     }
                                                 },
                                                 onGroupLongClick = { name ->
@@ -833,6 +815,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             StationGrid(
                                                 stations = stations,
                                                 viewModel = viewModel,
+                                                isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null,
                                                 onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                                 onLongClick = { stationToFavorite = it }
                                             )
@@ -843,6 +826,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         StationGrid(
                                             stations = stations,
                                             viewModel = viewModel,
+                                            isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null,
                                             onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                             onLongClick = { stationToFavorite = it }
                                         )
@@ -854,6 +838,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     StationGrid(
                                         stations = stations,
                                         viewModel = viewModel,
+                                        isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null,
                                         onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                         onLongClick = { stationToFavorite = it }
                                     )
@@ -861,12 +846,12 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                             NavigationItem.Recent -> {
                                 key("recent_stations") {
-                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    StationGrid(stations, viewModel, isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null) { stationToFavorite = it }
                                 }
                             }
                             NavigationItem.Favourites -> {
                                 key("favorite_stations") {
-                                    StationGrid(stations, viewModel) { stationToFavorite = it }
+                                    StationGrid(stations, viewModel, isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null) { stationToFavorite = it }
                                 }
                             }
                             NavigationItem.Search -> {
@@ -880,7 +865,8 @@ fun MainScreen(viewModel: MainViewModel) {
                                             genreToAdd = tags.find { it.name.equals(tagName, ignoreCase = true) }
                                                 ?: Tag(name = tagName, stationcount = 0)
                                         }
-                                    }
+                                    },
+                                    isGenreDialogOpen = genreToAdd != null || genreToRemove != null || stationToFavorite != null
                                 )
                             }
                             NavigationItem.Genres -> {
@@ -951,7 +937,11 @@ fun MainScreen(viewModel: MainViewModel) {
                                             Box(modifier = Modifier.weight(1f)) {
                                                 TagGrid(
                                                     tags = filteredTags,
-                                                    onTagClick = { viewModel.selectTag(it) },
+                                                    onTagClick = { 
+                                                        if (genreToAdd == null && genreToRemove == null && stationToFavorite == null) {
+                                                            viewModel.selectTag(it)
+                                                        }
+                                                    },
                                                     onTagLongClick = { tag ->
                                                         genreToAdd = tag
                                                     }
@@ -964,6 +954,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         StationGrid(
                                             stations = stations,
                                             viewModel = viewModel,
+                                            isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null,
                                             onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                             onLongClick = { stationToFavorite = it }
                                         )
@@ -980,6 +971,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         StationGrid(
                                             stations = stations,
                                             viewModel = viewModel,
+                                            isLongClickActive = stationToFavorite != null || genreToAdd != null || genreToRemove != null,
                                             onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null,
                                             onLongClick = { stationToFavorite = it }
                                         )
@@ -1053,7 +1045,39 @@ fun MainScreen(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(115.dp))
                 }
             }
+
+            if (error != null || successMessage != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .focusable(false),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        error?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            )
+                        }
+                        successMessage?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
 
         // Overlay NowPlayingBar at the bottom of the screen
         currentStation?.let { station ->
@@ -2234,7 +2258,12 @@ fun SettingsScreen(
 }
 
 @Composable
-fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, onTagGroupLongClick: ((String) -> Unit)? = null) {
+fun SearchScreen(
+    viewModel: MainViewModel, 
+    onLongClick: (Station) -> Unit = {}, 
+    onTagGroupLongClick: ((String) -> Unit)? = null,
+    isGenreDialogOpen: Boolean = false
+) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val stations by viewModel.stations.collectAsState()
     val recentSearches by viewModel.recentSearches.collectAsState()
@@ -2354,7 +2383,9 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                             groups = tagSearchGroups,
                             autoFocus = isReturning,
                             onGroupClick = { tagName ->
-                                viewModel.selectSearchTag(tagName)
+                                if (!isGenreDialogOpen) {
+                                    viewModel.selectSearchTag(tagName)
+                                }
                             },
                             onGroupLongClick = { tagName ->
                                 onTagGroupLongClick?.invoke(tagName)
@@ -2363,6 +2394,7 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                     }
                 }
             } else {
+
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (selectedSearchTag != null) {
                         Row(modifier = Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2384,6 +2416,7 @@ fun SearchScreen(viewModel: MainViewModel, onLongClick: (Station) -> Unit = {}, 
                             stations = stations, 
                             viewModel = viewModel, 
                             autoFocus = selectedSearchTag != null, 
+                            isLongClickActive = isGenreDialogOpen,
                             onLongClick = onLongClick,
                             onLoadMore = if (hasMoreStations) { { viewModel.loadMoreStations() } } else null
                         )
@@ -2556,6 +2589,7 @@ fun StationGrid(
     stations: List<Station>, 
     viewModel: MainViewModel, 
     autoFocus: Boolean = true,
+    isLongClickActive: Boolean = false,
     onLoadMore: (() -> Unit)? = null,
     onLongClick: (Station) -> Unit = {}
 ) {
@@ -2595,7 +2629,7 @@ fun StationGrid(
                         station = station,
                         isFavorite = favorites.contains(station.stationUuid),
                         isCurrent = currentStation?.stationUuid == station.stationUuid,
-                        onClick = { viewModel.playStation(station) },
+                        onClick = { if (!isLongClickActive) viewModel.playStation(station) },
                         onLongClick = { onLongClick(station) },
                         modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
                     )

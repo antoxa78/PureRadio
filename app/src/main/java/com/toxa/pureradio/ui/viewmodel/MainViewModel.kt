@@ -327,11 +327,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val station = _currentStation.value
                     if (_autoReconnectEnabled.value && station != null && stationRetryCount < 3) {
                         stationRetryCount++
-                        _error.value = "Connection lost. Retrying in 5s... ($stationRetryCount/3)"
                         _isPlaying.value = false
                         retryJob?.cancel()
                         retryJob = viewModelScope.launch {
-                            delay(5000)
+                            for (i in 5 downTo 1) {
+                                _error.value = "Connection lost. Retrying in ${i}s... ($stationRetryCount/3)"
+                                delay(1000)
+                            }
+                            _error.value = "Retrying now..."
                             playStation(station, resetErrors = false)
                         }
                     } else {
