@@ -171,7 +171,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"), Context.RECEIVER_NOT_EXPORTED)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"))
+        }
         setContent {
             val isPip by isInPipMode
             val isInitialized by viewModel.isInitialized.collectAsState()
@@ -280,11 +284,17 @@ class MainActivity : ComponentActivity() {
             }
 
             val params = builder.build()
-            setPictureInPictureParams(params)
+            try {
+                setPictureInPictureParams(params)
+            } catch (e: Exception) {
+                // Fallback for older versions if setPictureInPictureParams fails
+            }
             
             // For Android 14+ we call enterPictureInPictureMode manually if not auto-triggered
             if (android.os.Build.VERSION.SDK_INT >= 34) {
-                 enterPictureInPictureMode(params)
+                 try {
+                     enterPictureInPictureMode(params)
+                 } catch (e: Exception) {}
             }
         }
     }
