@@ -114,6 +114,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardActions
@@ -146,6 +147,8 @@ import com.toxa.pureradio.network.Country
 import com.toxa.pureradio.network.ServerStats
 import com.toxa.pureradio.network.Tag
 import com.toxa.pureradio.ui.theme.PureRadioTheme
+import com.toxa.pureradio.ui.viewmodel.AppLanguage
+import com.toxa.pureradio.ui.viewmodel.AppTheme
 import com.toxa.pureradio.ui.viewmodel.BitrateFilter
 import com.toxa.pureradio.ui.viewmodel.GenreGroup
 import com.toxa.pureradio.ui.viewmodel.MainViewModel
@@ -415,7 +418,7 @@ fun SplashScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color(0xFF1a1a1a)),
+            .background(androidx.compose.ui.graphics.Color(0xFF0A0E14)),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -425,7 +428,7 @@ fun SplashScreen() {
                         .size(220.dp)
                         .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value }
                         .background(
-                            androidx.compose.ui.graphics.Color(0xFFFBC02D).copy(alpha = 0.08f),
+                            androidx.compose.ui.graphics.Color(0xFF0047D1).copy(alpha = 0.12f),
                             CircleShape
                         )
                 )
@@ -434,7 +437,7 @@ fun SplashScreen() {
                         .size(160.dp)
                         .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value * 0.5f }
                         .background(
-                            androidx.compose.ui.graphics.Color(0xFFFBC02D).copy(alpha = 0.05f),
+                            androidx.compose.ui.graphics.Color(0xFF0047D1).copy(alpha = 0.08f),
                             CircleShape
                         )
                 )
@@ -456,7 +459,7 @@ fun SplashScreen() {
                 text = "Pure Radio",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.ExtraBold,
-                color = androidx.compose.ui.graphics.Color(0xFFFBC02D),
+                color = androidx.compose.ui.graphics.Color(0xFF0047D1),
                 modifier = Modifier.graphicsLayer {
                     alpha = titleAlpha.value
                     translationY = titleOffset.value
@@ -466,7 +469,7 @@ fun SplashScreen() {
             Text(
                 text = "Thousands of stations, for free",
                 style = MaterialTheme.typography.bodyMedium,
-                color = androidx.compose.ui.graphics.Color(0xFF8D6E63),
+                color = androidx.compose.ui.graphics.Color(0xFFB0BEC5),
                 modifier = Modifier.graphicsLayer { alpha = subAlpha.value }
             )
         }
@@ -586,6 +589,7 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         } else {
             when {
+                error != null -> viewModel.cancelRetry()
                 pendingImportStations != null -> viewModel.cancelRestore()
                 pendingOverwriteFile != null -> viewModel.cancelOverwrite()
                 filePickerState != null -> viewModel.closeFilePicker()
@@ -689,15 +693,15 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         ) {
                             val label = when (item) {
-                                NavigationItem.Home -> "Home"
-                                NavigationItem.Popular -> "Popular"
-                                NavigationItem.Recent -> "Recent"
-                                NavigationItem.Search -> "Search"
-                                NavigationItem.Genres -> "Genres"
-                                NavigationItem.Countries -> "Countries"
-                                NavigationItem.Favourites -> "Favourites"
-                                NavigationItem.Settings -> "Settings"
-                                NavigationItem.Exit -> "Exit"
+                                NavigationItem.Home -> stringResource(R.string.nav_home)
+                                NavigationItem.Popular -> stringResource(R.string.nav_popular)
+                                NavigationItem.Recent -> stringResource(R.string.nav_recent)
+                                NavigationItem.Search -> stringResource(R.string.nav_search)
+                                NavigationItem.Genres -> stringResource(R.string.nav_genres)
+                                NavigationItem.Countries -> stringResource(R.string.nav_countries)
+                                NavigationItem.Favourites -> stringResource(R.string.nav_favourites)
+                                NavigationItem.Settings -> stringResource(R.string.nav_settings)
+                                NavigationItem.Exit -> stringResource(R.string.nav_exit)
                             }
                             Text(
                                 label,
@@ -716,22 +720,24 @@ fun MainScreen(viewModel: MainViewModel) {
                     val title = when {
                     selectedTag != null -> {
                         val name = selectedTag!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                        "$name (${stations.size} Stations)"
+                        val stationsText = stringResource(R.string.stations_count, stations.size)
+                        "$name $stationsText"
                     }
                     selectedCountry != null -> {
                         val name = selectedCountry!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                        "$name (${stations.size} Stations)"
+                        val stationsText = stringResource(R.string.stations_count, stations.size)
+                        "$name $stationsText"
                     }
                     else -> when (selectedNavItem) {
-                        NavigationItem.Home -> "Home"
-                        NavigationItem.Popular -> "Popular"
-                        NavigationItem.Recent -> "Recent"
-                        NavigationItem.Search -> "Search"
-                        NavigationItem.Genres -> "Genres"
-                        NavigationItem.Countries -> "Countries"
-                        NavigationItem.Favourites -> "Favourites"
-                        NavigationItem.Settings -> "Settings"
-                        NavigationItem.Exit -> "Exit"
+                        NavigationItem.Home -> stringResource(R.string.nav_home)
+                        NavigationItem.Popular -> stringResource(R.string.nav_popular)
+                        NavigationItem.Recent -> stringResource(R.string.nav_recent)
+                        NavigationItem.Search -> stringResource(R.string.nav_search)
+                        NavigationItem.Genres -> stringResource(R.string.nav_genres)
+                        NavigationItem.Countries -> stringResource(R.string.nav_countries)
+                        NavigationItem.Favourites -> stringResource(R.string.nav_favourites)
+                        NavigationItem.Settings -> stringResource(R.string.nav_settings)
+                        NavigationItem.Exit -> stringResource(R.string.nav_exit)
                     }
                 }
                 val isDeepDive = selectedTag != null || selectedCountry != null
@@ -887,7 +893,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             OutlinedTextField(
                                                 value = localTagSearchQuery,
                                                 onValueChange = { localTagSearchQuery = it; viewModel.setTagSearchQuery(it) },
-                                                label = { Text("Search genres...") },
+                                                label = { Text(stringResource(R.string.search_genres_hint)) },
                                                 modifier = Modifier.weight(1f),
                                                 singleLine = true,
                                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -1136,7 +1142,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("Overwrite Backup File?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.dialog_overwrite_backup), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
                         "File \"${file.name}\" already exists. Overwrite it?",
                         style = MaterialTheme.typography.bodyMedium,
@@ -1294,7 +1300,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "Add to Home Tab?",
+                        text = stringResource(R.string.dialog_add_home),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1388,7 +1394,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "Remove from Home Tab?",
+                        text = stringResource(R.string.dialog_remove_home),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1691,6 +1697,7 @@ fun SettingsScreen(
     val autoReconnectEnabled by viewModel.autoReconnectEnabled.collectAsState()
     val extraBufferingEnabled by viewModel.extraBufferingEnabled.collectAsState()
     val defaultCategory by viewModel.defaultCategory.collectAsState()
+    val appLanguage by viewModel.appLanguage.collectAsState()
 
     val subMenuFocusRequester = remember { FocusRequester() }
     val mainMenuFocusRequester = remember { FocusRequester() }
@@ -1718,11 +1725,11 @@ fun SettingsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Personalize Home Tab", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.settings_personalize_home), style = MaterialTheme.typography.headlineMedium)
                         
                         Spacer(modifier = Modifier.weight(1f))
                         
-                        Text("Sort: ", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.sort_label), style = MaterialTheme.typography.labelLarge)
                         com.toxa.pureradio.ui.viewmodel.GenreSortMode.entries.forEach { mode ->
                             Button(
                                 onClick = { viewModel.setGenreSortMode(mode) },
@@ -1736,7 +1743,7 @@ fun SettingsScreen(
                                     androidx.tv.material3.ButtonDefaults.colors()
                                 }
                             ) {
-                                Text(mode.name)
+                                Text(if (mode == com.toxa.pureradio.ui.viewmodel.GenreSortMode.Name) stringResource(R.string.sort_name) else stringResource(R.string.sort_count))
                             }
                         }
                     }
@@ -1748,7 +1755,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = localTagSearchQuery,
                         onValueChange = { viewModel.setTagSearchQuery(it); localTagSearchQuery = it },
-                        label = { Text("Search tags...") },
+                        label = { Text(stringResource(R.string.search_genres_hint)) },
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -1801,7 +1808,7 @@ fun SettingsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Database Update Interval", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.settings_db_update_interval), style = MaterialTheme.typography.headlineMedium)
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -1843,7 +1850,7 @@ fun SettingsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Screensaver Preferences", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.settings_screensaver_prefs), style = MaterialTheme.typography.headlineMedium)
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -1913,26 +1920,28 @@ fun SettingsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Application Theme", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.settings_app_theme), style = MaterialTheme.typography.headlineMedium)
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
-                items(com.toxa.pureradio.ui.viewmodel.AppTheme.entries) { theme ->
+                items(AppTheme.entries) { theme ->
                     val label = when (theme) {
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Retro Gold"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Blue Neon"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Violet"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Monochrome"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Forest"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "Contrast"
+                        AppTheme.ModernBlue -> "Modern Blue"
+                        AppTheme.RetroGold -> "Retro Gold"
+                        AppTheme.BlueNeon -> "Blue Neon"
+                        AppTheme.Violet -> "Violet"
+                        AppTheme.Monochrome -> "Monochrome"
+                        AppTheme.Forest -> "Forest"
+                        AppTheme.Contrast -> "Contrast"
                     }
                     val desc = when (theme) {
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Classic gold and wood tones"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Cool blue neon glow"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Purple and violet tones"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Grey and black"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Green and black"
-                        com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "White and black"
+                        AppTheme.ModernBlue -> "Sleek blue with high contrast"
+                        AppTheme.RetroGold -> "Classic gold and wood tones"
+                        AppTheme.BlueNeon -> "Cool blue neon glow"
+                        AppTheme.Violet -> "Purple and violet tones"
+                        AppTheme.Monochrome -> "Grey and black"
+                        AppTheme.Forest -> "Green and black"
+                        AppTheme.Contrast -> "White and black"
                     }
                     ListItem(
                         selected = appTheme == theme,
@@ -1942,6 +1951,38 @@ fun SettingsScreen(
                         trailingContent = {
                             if (appTheme == theme) {
                                 Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        "AppLanguage" -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+            ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = { viewModel.setSettingsSubMenu(null) },
+                            modifier = Modifier.focusRequester(subMenuFocusRequester)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(stringResource(R.string.settings_app_language), style = MaterialTheme.typography.headlineMedium)
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+                items(AppLanguage.entries) { language ->
+                    ListItem(
+                        selected = appLanguage == language,
+                        onClick = { viewModel.setAppLanguage(language) },
+                        headlineContent = { Text(language.name) },
+                        trailingContent = {
+                            if (appLanguage == language) {
+                                Icon(Icons.Default.Public, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     )
@@ -1962,7 +2003,7 @@ fun SettingsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Text("Startup Category", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.settings_startup_category), style = MaterialTheme.typography.headlineMedium)
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -1990,7 +2031,7 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
             ) {
                 item {
-                    Text("System Settings", style = MaterialTheme.typography.headlineLarge)
+                    Text(stringResource(R.string.nav_settings), style = MaterialTheme.typography.headlineLarge)
                     Spacer(modifier = Modifier.height(24.dp))
                 }
 
@@ -1999,15 +2040,16 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AppTheme") },
                         modifier = Modifier.focusRequester(mainMenuFocusRequester),
-                        headlineContent = { Text("Application Theme") },
+                        headlineContent = { Text(stringResource(R.string.settings_app_theme)) },
                         supportingContent = {
                             val label = when (appTheme) {
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.RetroGold -> "Retro Gold"
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.BlueNeon -> "Blue Neon"
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.Violet -> "Violet"
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.Monochrome -> "Monochrome"
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.Forest -> "Forest"
-                                com.toxa.pureradio.ui.viewmodel.AppTheme.Contrast -> "Contrast"
+                                AppTheme.ModernBlue -> "Modern Blue"
+                                AppTheme.RetroGold -> "Retro Gold"
+                                AppTheme.BlueNeon -> "Blue Neon"
+                                AppTheme.Violet -> "Violet"
+                                AppTheme.Monochrome -> "Monochrome"
+                                AppTheme.Forest -> "Forest"
+                                AppTheme.Contrast -> "Contrast"
                             }
                             Text("Current: $label")
                         },
@@ -2019,8 +2061,19 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("AppLanguage") },
+                        headlineContent = { Text(stringResource(R.string.settings_app_language)) },
+                        supportingContent = { Text("Current: ${appLanguage.name}") },
+                        leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.setSettingsSubMenu("DefaultCategory") },
-                        headlineContent = { Text("Startup Category") },
+                        headlineContent = { Text(stringResource(R.string.settings_startup_category)) },
                         supportingContent = { Text("Currently: ${defaultCategory.name}") },
                         leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
@@ -2031,8 +2084,8 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setQuitConfirmationEnabled(!quitConfirmationEnabled) },
-                        headlineContent = { Text("Quit Confirmation") },
-                        supportingContent = { Text("Ask before exiting the application") },
+                        headlineContent = { Text(stringResource(R.string.settings_quit_confirmation)) },
+                        supportingContent = { Text(stringResource(R.string.settings_quit_confirmation_desc)) },
                         leadingContent = { Icon(Icons.Default.Warning, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = quitConfirmationEnabled, onCheckedChange = null)
@@ -2044,8 +2097,8 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setAutoReconnectEnabled(!autoReconnectEnabled) },
-                        headlineContent = { Text("Auto Reconnect") },
-                        supportingContent = { Text("Attempt to reconnect if the stream is interrupted") },
+                        headlineContent = { Text(stringResource(R.string.settings_auto_reconnect)) },
+                        supportingContent = { Text(stringResource(R.string.settings_auto_reconnect_desc)) },
                         leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = autoReconnectEnabled, onCheckedChange = null)
@@ -2057,8 +2110,8 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setExtraBufferingEnabled(!extraBufferingEnabled) },
-                        headlineContent = { Text("Extra Buffering") },
-                        supportingContent = { Text("Increase buffer size for unstable connections (increases start time)") },
+                        headlineContent = { Text(stringResource(R.string.settings_extra_buffering)) },
+                        supportingContent = { Text(stringResource(R.string.settings_extra_buffering_desc)) },
                         leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = extraBufferingEnabled, onCheckedChange = null)
@@ -2070,9 +2123,9 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("Screensaver") },
-                        headlineContent = { Text("Ambient & Screensaver") },
+                        headlineContent = { Text(stringResource(R.string.settings_ambient_screensaver)) },
                         supportingContent = {
-                            val label = if (screensaverEnabled) "Enabled (${screensaverTimeout}m)" else "Disabled"
+                            val label = if (screensaverEnabled) stringResource(R.string.settings_ambient_screensaver_desc_enabled, screensaverTimeout) else stringResource(R.string.settings_ambient_screensaver_desc_disabled)
                             Text("Current status: $label")
                         },
                         leadingContent = { Icon(Icons.Default.MusicVideo, contentDescription = null) },
@@ -2085,8 +2138,8 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleAudioPassthrough() },
-                        headlineContent = { Text("Audio Passthrough (Bit-Perfect)") },
-                        supportingContent = { Text("Experimental: Bypass Android resampler. Note: Ensure 'Match content sample rate' is ON in Shield settings.") },
+                        headlineContent = { Text(stringResource(R.string.settings_audio_passthrough)) },
+                        supportingContent = { Text(stringResource(R.string.settings_audio_passthrough_desc)) },
                         leadingContent = { Icon(Icons.Default.MusicNote, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = audioPassthrough, onCheckedChange = null)
@@ -2095,12 +2148,11 @@ fun SettingsScreen(
                 }
 
                 item {
-                    Text("STATION DATABASE", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleHideBroken() },
-                        headlineContent = { Text("Smart Filter") },
-                        supportingContent = { Text("Automatically hide stations with reported connection issues") },
+                        headlineContent = { Text(stringResource(R.string.settings_smart_filter)) },
+                        supportingContent = { Text(stringResource(R.string.settings_smart_filter_desc)) },
                         leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = hideBroken, onCheckedChange = null)
@@ -2112,8 +2164,8 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleMinTagFilter() },
-                        headlineContent = { Text("Min Tag Station Count") },
-                        supportingContent = { Text("Do not load tags with less than 101 stations") },
+                        headlineContent = { Text(stringResource(R.string.settings_min_tag_count)) },
+                        supportingContent = { Text(stringResource(R.string.settings_min_tag_count_desc)) },
                         leadingContent = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = minTagFilter, onCheckedChange = null)
@@ -2125,12 +2177,12 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
-                        headlineContent = { Text("Background Synchronization") },
+                        headlineContent = { Text(stringResource(R.string.settings_bg_sync)) },
                         supportingContent = { 
                             val label = when(autoUpdateInterval) {
-                                12 -> "12 Hours"
-                                24 -> "24 Hours"
-                                else -> "Disabled"
+                                12 -> stringResource(R.string.settings_bg_sync_desc_12)
+                                24 -> stringResource(R.string.settings_bg_sync_desc_24)
+                                else -> stringResource(R.string.settings_bg_sync_desc_off)
                             }
                             Text("Update frequency: $label") 
                         },
@@ -2147,7 +2199,7 @@ fun SettingsScreen(
                         onClick = { 
                             viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
                         },
-                        headlineContent = { Text("Backup Favourites") },
+                        headlineContent = { Text(stringResource(R.string.settings_backup_favs)) },
                         supportingContent = { Text("Export your collection using the built-in file manager") },
                         leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                     )
@@ -2297,7 +2349,7 @@ fun SearchScreen(
             OutlinedTextField(
                 value = localSearchQuery,
                 onValueChange = { viewModel.onSearchQueryChange(it); localSearchQuery = it },
-                label = { Text("Search stations...") },
+                label = { Text(stringResource(R.string.search_stations_hint)) },
                 modifier = Modifier
                     .weight(1f)
                     .padding(bottom = 16.dp)
@@ -2338,7 +2390,7 @@ fun SearchScreen(
         }
         
         if (isLoading) {
-            Text("Searching...", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
+            Text(stringResource(R.string.search_loading), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
         }
 
         BitrateFilters(
@@ -2351,7 +2403,7 @@ fun SearchScreen(
             if (stations.isEmpty() && localSearchQuery.isEmpty() && tagSearchGroups.isEmpty()) {
                 if (recentSearches.isNotEmpty()) {
                     Column {
-                        Text("Recent Searches", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                        Text(stringResource(R.string.search_recent), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
                         LazyRow {
                             items(recentSearches) { query ->
                                 Button(
@@ -2368,12 +2420,12 @@ fun SearchScreen(
                         }
                     }
                 } else {
-                    Text("Enter search query", modifier = Modifier.padding(top = 16.dp))
+                    Text(stringResource(R.string.search_empty_hint), modifier = Modifier.padding(top = 16.dp))
                 }
             } else if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag && tagSearchGroups.isNotEmpty() && selectedSearchTag == null) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Text(
-                        text = "Found ${stations.size} stations — select a tag to filter",
+                        text = stringResource(R.string.search_tag_filter_hint, stations.size),
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(vertical = 4.dp, horizontal = 4.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2405,7 +2457,7 @@ fun SearchScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "(${stations.size} stations)",
+                                text = stringResource(R.string.stations_count, stations.size),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -3105,17 +3157,15 @@ fun Screensaver(viewModel: MainViewModel) {
                         
                         Spacer(modifier = Modifier.height(24.dp))
                         WaveformAnalyzer(isPlaying = isPlaying)
+
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Text(
+                            text = stringResource(R.string.screensaver_return_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.Gray.copy(alpha = 0.5f)
+                        )
                     }
                 }
-                
-                Text(
-                    text = "Press any key to return",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.Gray.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 32.dp)
-                )
             }
         }
     }

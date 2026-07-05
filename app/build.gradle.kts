@@ -15,8 +15,8 @@ android {
         applicationId = "com.toxa.pureradio"
         minSdk = 28
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.3.3"
+        versionCode = 12
+        versionName = "1.3.5"
 
         buildConfigField("Long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }

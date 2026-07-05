@@ -110,12 +110,30 @@ private val ContrastColorScheme = darkColorScheme(
 )
 
 @OptIn(ExperimentalTvMaterial3Api::class)
+private val ModernBlueColorScheme = darkColorScheme(
+    primary = BluePrimary,
+    secondary = BlueSecondary,
+    tertiary = BlueTertiary,
+    background = Color(0xFF0A0E14),
+    surface = Color(0xFF151B24),
+    surfaceVariant = Color(0xFF1F2933),
+    onPrimary = White,
+    onSecondary = White,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    primaryContainer = BlueDark,
+    onPrimaryContainer = BluePrimary
+)
+
+@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun PureRadioTheme(
-    theme: AppTheme = AppTheme.RetroGold,
+    theme: AppTheme = AppTheme.ModernBlue,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when (theme) {
+        AppTheme.ModernBlue -> ModernBlueColorScheme
         AppTheme.RetroGold -> RetroGoldColorScheme
         AppTheme.BlueNeon -> BlueNeonColorScheme
         AppTheme.Violet -> VioletColorScheme

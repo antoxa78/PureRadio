@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
 import androidx.annotation.OptIn
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.C
 import androidx.media3.common.AudioAttributes
@@ -66,7 +68,11 @@ enum class SearchMode {
 }
 
 enum class AppTheme {
-    RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast
+    ModernBlue, RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast
+}
+
+enum class AppLanguage {
+    English, Russian, Ukrainian
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -240,6 +246,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _defaultCategory = MutableStateFlow(loadDefaultCategory())
     val defaultCategory: StateFlow<NavigationItem> = _defaultCategory
 
+    private val _appLanguage = MutableStateFlow(loadAppLanguage())
+    val appLanguage: StateFlow<AppLanguage> = _appLanguage
+
     private val _autoReconnectEnabled = MutableStateFlow(prefs.getBoolean("auto_reconnect", true))
     val autoReconnectEnabled: StateFlow<Boolean> = _autoReconnectEnabled
 
@@ -253,6 +262,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob: kotlinx.coroutines.Job? = null
 
     init {
+        applyLanguage(_appLanguage.value)
         initializePlayer()
         loadTags()
         loadStats()
@@ -331,10 +341,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         retryJob?.cancel()
                         retryJob = viewModelScope.launch {
                             for (i in 5 downTo 1) {
-                                _error.value = "Connection lost. Retrying in ${i}s... ($stationRetryCount/3)"
+                                _error.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_connection_lost, i, stationRetryCount)
                                 delay(1000)
                             }
-                            _error.value = "Retrying now..."
+                            _error.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_retrying_now)
                             playStation(station, resetErrors = false)
                         }
                     } else {
@@ -895,8 +905,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadAppTheme(): AppTheme {
-        val name = prefs.getString("app_theme", AppTheme.RetroGold.name) ?: AppTheme.RetroGold.name
-        return try { AppTheme.valueOf(name) } catch (e: Exception) { AppTheme.RetroGold }
+        val name = prefs.getString("app_theme", AppTheme.ModernBlue.name) ?: AppTheme.ModernBlue.name
+        return try { AppTheme.valueOf(name) } catch (e: Exception) { AppTheme.ModernBlue }
+    }
+
+    private fun loadAppLanguage(): AppLanguage {
+        val lang = prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name
+        return try { AppLanguage.valueOf(lang) } catch (e: Exception) { AppLanguage.English }
+    }
+
+    fun setAppLanguage(language: AppLanguage) {
+        _appLanguage.value = language
+        prefs.edit().putString("app_language", language.name).apply()
+        applyLanguage(language)
+    }
+
+    private fun applyLanguage(language: AppLanguage) {
+        val localeTag = when (language) {
+            AppLanguage.English -> "en"
+            AppLanguage.Russian -> "ru"
+            AppLanguage.Ukrainian -> "uk"
+        }
+        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(localeTag))
     }
 
     private fun loadDefaultCategory(): NavigationItem {
@@ -975,6 +1005,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setError(message: String) {
         _error.value = message
+    }
+
+    fun cancelRetry() {
+        retryJob?.cancel()
+        stationRetryCount = 0
+        _error.value = null
     }
 
     fun clearError() {
