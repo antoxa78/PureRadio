@@ -428,7 +428,7 @@ fun SplashScreen() {
                         .size(220.dp)
                         .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value }
                         .background(
-                            androidx.compose.ui.graphics.Color(0xFF0047D1).copy(alpha = 0.12f),
+                            androidx.compose.ui.graphics.Color(0xFF00B0FF).copy(alpha = 0.12f),
                             CircleShape
                         )
                 )
@@ -437,7 +437,7 @@ fun SplashScreen() {
                         .size(160.dp)
                         .graphicsLayer { alpha = glowAlpha.value * pulseGlow.value * 0.5f }
                         .background(
-                            androidx.compose.ui.graphics.Color(0xFF0047D1).copy(alpha = 0.08f),
+                            androidx.compose.ui.graphics.Color(0xFF00B0FF).copy(alpha = 0.08f),
                             CircleShape
                         )
                 )
@@ -455,16 +455,28 @@ fun SplashScreen() {
                 )
             }
             Spacer(modifier = Modifier.height(32.dp))
-            Text(
-                text = "Pure Radio",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.ExtraBold,
-                color = androidx.compose.ui.graphics.Color(0xFF0047D1),
-                modifier = Modifier.graphicsLayer {
-                    alpha = titleAlpha.value
-                    translationY = titleOffset.value
-                }
-            )
+            Row {
+                Text(
+                    text = "Pure ",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.graphicsLayer {
+                        alpha = titleAlpha.value
+                        translationY = titleOffset.value
+                    }
+                )
+                Text(
+                    text = "Radio",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = androidx.compose.ui.graphics.Color(0xFF00B0FF),
+                    modifier = Modifier.graphicsLayer {
+                        alpha = titleAlpha.value
+                        translationY = titleOffset.value
+                    }
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Thousands of stations, for free",

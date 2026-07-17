@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.6] - 2026-07-17
+
+### Added
+- **New Branding**: Modernized application icon and splash screen.
+- **Refreshed Visuals**: Updated color palette to a dark blue/cyan theme across the app.
+
 ## [1.2.2] - 2026-05-29
 
 ### Changed

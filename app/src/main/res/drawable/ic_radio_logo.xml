@@ -3,43 +3,82 @@
     android:height="200dp"
     android:viewportWidth="1024"
     android:viewportHeight="1024">
-    <!-- Rounded Blue Background -->
+
+    <!-- Rounded Background -->
     <path
-        android:fillColor="#0047D1"
+        android:fillColor="#0A0E14"
         android:pathData="M256,128h512c70.7,0 128,57.3 128,128v512c0,70.7 -57.3,128 -128,128h-512c-70.7,0 -128,-57.3 -128,-128v-512c0,-70.7 57.3,-128 128,-128z"/>
+
+    <!-- Signal Waves (Left) -->
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M320,380 A280,280 0 0,0 320,644" />
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M240,320 A380,380 0 0,0 240,704" />
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M160,260 A480,480 0 0,0 160,764" />
+
+    <!-- Signal Waves (Right) -->
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M704,380 A280,280 0 0,1 704,644" />
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M784,320 A380,380 0 0,1 784,704" />
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="20"
+        android:strokeLineCap="round"
+        android:pathData="M864,260 A480,480 0 0,1 864,764" />
+
+    <!-- Main Circle -->
+    <path
+        android:strokeColor="#00B0FF"
+        android:strokeWidth="30"
+        android:pathData="M512,512m-320,0a320,320 0,1 1,640 0a320,320 0,1 1,-640 0" />
 
     <!-- Antenna -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M700,320 L300,150 L280,180 L680,350 Z"/>
+        android:fillColor="#00B0FF"
+        android:pathData="M600,380 L420,280 L430,265 L610,365 Z"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M700,320m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0"/>
+        android:fillColor="#00B0FF"
+        android:pathData="M610,370m-15,0a15,15 0,1 1,30 0a15,15 0,1 1,-30 0"/>
 
     <!-- Radio Body -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M230,350h564c20,0 40,20 40,40v420c0,20 -20,40 -40,40h-564c-20,0 -40,-20 -40,-40v-420c0,-20 20,-40 40,-40z"/>
-
-    <!-- Dial -->
-    <path
-        android:fillColor="#0047D1"
-        android:pathData="M280,410h464v100h-464z"/>
-    <!-- Tuning Needle -->
-    <path
-        android:fillColor="#FF3B30"
-        android:pathData="M500,410h24v100h-24z"/>
+        android:fillColor="#00B0FF"
+        android:pathData="M350,420h324c40,0 60,20 60,60v140c0,40 -20,60 -60,60h-324c-40,0 -60,-20 -60,-60v-140c0,-40 20,-60 60,-60z"/>
 
     <!-- Speaker detail -->
     <path
-        android:fillColor="#0047D1"
-        android:pathData="M280,580h150v20h-150z M280,630h150v20h-150z M280,680h150v20h-150z"/>
+        android:fillColor="#0A0E14"
+        android:pathData="M380,500h100v20c0,5.5 -4.5,10 -10,10h-80c-5.5,0 -10,-4.5 -10,-10z"/>
+    <path
+        android:fillColor="#0A0E14"
+        android:pathData="M380,540h100v20c0,5.5 -4.5,10 -10,10h-80c-5.5,0 -10,-4.5 -10,-10z"/>
+    <path
+        android:fillColor="#0A0E14"
+        android:pathData="M380,580h100v20c0,5.5 -4.5,10 -10,10h-80c-5.5,0 -10,-4.5 -10,-10z"/>
 
-    <!-- Tuning Knob -->
+    <!-- Dial -->
     <path
-        android:fillColor="#0047D1"
-        android:pathData="M650,650m-80,0a80,80 0,1 1,160 0a80,80 0,1 1,-160 0"/>
+        android:fillColor="#0A0E14"
+        android:pathData="M580,550m-60,0a60,60 0,1 1,120 0a60,60 0,1 1,-120 0"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M650,650m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+        android:fillColor="#00B0FF"
+        android:pathData="M580,550m-25,0a25,25 0,1 1,50 0a25,25 0,1 1,-50 0"/>
+
 </vector>
