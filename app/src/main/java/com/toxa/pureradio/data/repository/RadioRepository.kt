@@ -36,11 +36,7 @@ class RadioRepository {
     }
 
     suspend fun getTopStations(limit: Int = 100, hideBroken: Boolean = false): List<Station> {
-        return try {
-            getService().getTopStations(limit = limit, hideBroken = hideBroken)
-        } catch (e: Exception) {
-            emptyList()
-        }
+        return getService().getTopStations(limit = limit, hideBroken = hideBroken)
     }
 
     suspend fun searchStations(
@@ -51,74 +47,54 @@ class RadioRepository {
         offset: Int = 0,
         hideBroken: Boolean = false
     ): List<Station> {
-        return try {
-            val service = getService()
-            val results = service.searchStations(
-                name = query,
-                tag = tag,
+        val service = getService()
+        val results = service.searchStations(
+            name = query,
+            tag = tag,
+            country = country,
+            limit = limit,
+            offset = offset,
+            hideBroken = hideBroken
+        )
+        
+        val combined = if (query != null && tag == null) {
+            val byTag = service.searchStations(
+                tag = query,
                 country = country,
                 limit = limit,
                 offset = offset,
                 hideBroken = hideBroken
             )
-            
-            val combined = if (query != null && tag == null) {
-                val byTag = service.searchStations(
-                    tag = query,
-                    country = country,
-                    limit = limit,
-                    offset = offset,
-                    hideBroken = hideBroken
-                )
-                (results + byTag).distinctBy { it.stationUuid }
-            } else if (tag != null && query == null) {
-                val byName = service.searchStations(
-                    name = tag,
-                    country = country,
-                    limit = limit,
-                    offset = offset,
-                    hideBroken = hideBroken
-                )
-                (results + byName).distinctBy { it.stationUuid }
-            } else {
-                results
-            }
-            
-            combined
-        } catch (e: Exception) {
-            emptyList()
+            (results + byTag).distinctBy { it.stationUuid }
+        } else if (tag != null && query == null) {
+            val byName = service.searchStations(
+                name = tag,
+                country = country,
+                limit = limit,
+                offset = offset,
+                hideBroken = hideBroken
+            )
+            (results + byName).distinctBy { it.stationUuid }
+        } else {
+            results
         }
+        
+        return combined
     }
 
     suspend fun getStats(): ServerStats? {
-        return try {
-            getService().getStats()
-        } catch (e: Exception) {
-            null
-        }
+        return getService().getStats()
     }
 
     suspend fun getTags(limit: Int = 500): List<Tag> {
-        return try {
-            getService().getTags(limit = limit)
-        } catch (e: Exception) {
-            emptyList()
-        }
+        return getService().getTags(limit = limit)
     }
 
     suspend fun getCountries(): List<Country> {
-        return try {
-            getService().getCountries()
-        } catch (e: Exception) {
-            emptyList()
-        }
+        return getService().getCountries()
     }
 
     suspend fun getStationsByUuid(uuids: String): List<Station> {
-        return try {
-            getService().getStationsByUuid(uuids)
-        } catch (e: Exception) {
-            emptyList()
-        }
+        return getService().getStationsByUuid(uuids)
     }
 }

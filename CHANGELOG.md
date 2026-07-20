@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.7] - 2026-07-20
+
+### Added
+- **MediaSession Integration**: Improved system-level media integration and player stability.
+- **TV Stability**: Added screen wake lock to prevent the device from sleeping during playback.
+
+### Fixed
+- **Playback State Sync**: Fixed potential UI desync issues by driving the playback state directly from player events.
+- **Error Handling**: Improved error transparency for network failures and search operations.
+- **Exit Logic**: Standardized application closure behavior using standard Activity lifecycle.
+
 ## [1.3.6] - 2026-07-17
 
 ### Added

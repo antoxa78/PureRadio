@@ -16,6 +16,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.session.MediaSession
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -78,6 +79,7 @@ enum class AppLanguage {
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RadioRepository()
     private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
     private val prefs = application.getSharedPreferences("pure_radio_prefs", Context.MODE_PRIVATE)
 
     private val _allStations = MutableStateFlow<List<Station>>(emptyList())
@@ -365,6 +367,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         consecutiveErrors = 0
                         _error.value = null
                     }
+                    _isPlaying.value = isPlaying
                 }
 
                 override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
@@ -386,6 +389,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             })
         }
+        mediaSession = MediaSession.Builder(context, player!!).build()
     }
 
     private fun reinitializePlayer() {
@@ -393,6 +397,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentPos = player?.currentPosition ?: 0L
         val currentItem = player?.currentMediaItem
 
+        mediaSession?.release()
+        mediaSession = null
         player?.release()
         player = null
         initializePlayer()
@@ -1857,6 +1863,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        mediaSession?.release()
+        mediaSession = null
         player?.release()
         player = null
     }

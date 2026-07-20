@@ -8,6 +8,7 @@ import android.graphics.drawable.Icon
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.app.Activity
 import android.content.IntentFilter
 import android.util.Rational
 import android.content.res.Configuration
@@ -174,6 +175,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"), Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -597,7 +599,7 @@ fun MainScreen(viewModel: MainViewModel) {
             if (quitConfirmationEnabled) {
                 showExitDialog = true
             } else {
-                kotlin.system.exitProcess(0)
+                (context as? Activity)?.finish()
             }
         } else {
             when {
@@ -1521,7 +1523,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             Text("NO", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
-                            onClick = { kotlin.system.exitProcess(0) },
+                            onClick = { (context as? Activity)?.finish() },
                             modifier = Modifier.weight(1f).focusRequester(exitYesFocusRequester),
                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                 containerColor = MaterialTheme.colorScheme.error,
