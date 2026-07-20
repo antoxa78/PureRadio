@@ -1,4 +1,5 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="1024"
@@ -11,43 +12,106 @@
 
         <!-- Signal Waves (Left) -->
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M320,380 A280,280 0 0,0 320,644" />
+            android:pathData="M320,380 A280,280 0 0,0 320,644">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="160" android:startY="260"
+                    android:endX="320" android:endY="644"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M240,320 A380,380 0 0,0 240,704" />
+            android:pathData="M240,320 A380,380 0 0,0 240,704">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="160" android:startY="260"
+                    android:endX="240" android:endY="704"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M160,260 A480,480 0 0,0 160,764" />
+            android:pathData="M160,260 A480,480 0 0,0 160,764">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="160" android:startY="260"
+                    android:endX="160" android:endY="764"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
 
         <!-- Signal Waves (Right) -->
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M704,380 A280,280 0 0,1 704,644" />
+            android:pathData="M704,380 A280,280 0 0,1 704,644">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="704" android:startY="380"
+                    android:endX="864" android:endY="764"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M784,320 A380,380 0 0,1 784,704" />
+            android:pathData="M784,320 A380,380 0 0,1 784,704">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="704" android:startY="380"
+                    android:endX="784" android:endY="704"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="20"
             android:strokeLineCap="round"
-            android:pathData="M864,260 A480,480 0 0,1 864,764" />
+            android:pathData="M864,260 A480,480 0 0,1 864,764">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="704" android:startY="380"
+                    android:endX="864" android:endY="764"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
 
         <!-- Main Circle -->
         <path
-            android:strokeColor="#00B0FF"
             android:strokeWidth="30"
-            android:pathData="M512,512m-320,0a320,320 0,1 1,640 0a320,320 0,1 1,-640 0" />
+            android:pathData="M512,512m-320,0a320,320 0,1 1,640 0a320,320 0,1 1,-640 0">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:startX="192" android:startY="192"
+                    android:endX="832" android:endY="832"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
 
         <!-- Antenna -->
         <path
@@ -59,8 +123,17 @@
 
         <!-- Radio Body -->
         <path
-            android:fillColor="#00B0FF"
-            android:pathData="M350,420h324c40,0 60,20 60,60v140c0,40 -20,60 -60,60h-324c-40,0 -60,-20 -60,-60v-140c0,-40 20,-60 60,-60z"/>
+            android:pathData="M350,420h324c40,0 60,20 60,60v140c0,40 -20,60 -60,60h-324c-40,0 -60,-20 -60,-60v-140c0,-40 20,-60 60,-60z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="290" android:startY="420"
+                    android:endX="734" android:endY="680"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#00B0FF"/>
+                    <item android:offset="1" android:color="#0047D1"/>
+                </gradient>
+            </aapt:attr>
+        </path>
 
         <!-- Speaker detail -->
         <path

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.8] - 2026-07-20
+
+### Fixed
+- **TV Branding**: Fixed issue where older icons were displayed on Nvidia Shield (Leanback launcher).
+- **Icon Quality**: Refined vector icons with high-quality gradients and better symmetry.
+- **Adaptive Icons**: Updated launcher background with a premium radial gradient.
+
 ## [1.3.7] - 2026-07-20
 
 ### Added
