@@ -504,6 +504,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val isInitialized by viewModel.isInitialized.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val infoMessage by viewModel.infoMessage.collectAsState()
     val successMessage by viewModel.successMessage.collectAsState()
     val selectedTag by viewModel.selectedTag.collectAsState()
     val selectedCountry by viewModel.selectedCountry.collectAsState()
@@ -800,7 +801,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (error == null && successMessage == null) {
+                    if (successMessage == null) {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
                                 if (genreGroups.isNotEmpty()) {
@@ -1091,6 +1092,42 @@ fun MainScreen(viewModel: MainViewModel) {
                                 color = MaterialTheme.colorScheme.primary,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 modifier = Modifier.padding(horizontal = 32.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (infoMessage != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = if (currentStation != null) 125.dp else 16.dp),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Surface(
+                        colors = SurfaceDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f),
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        shape = MaterialTheme.shapes.medium,
+                        tonalElevation = 4.dp,
+                        modifier = Modifier.padding(horizontal = 32.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = infoMessage!!,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }

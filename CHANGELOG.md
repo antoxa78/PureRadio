@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.9] - 2026-07-21
+
+### Improved
+- **Reconnection UX**: Connection lost messages are now displayed as non-disruptive information messages at the bottom of the screen.
+- **UI Stability**: Fixed an issue where the station selector would move or reset when reconnection attempts were in progress.
+
 ## [1.3.8] - 2026-07-20
 
 ### Fixed

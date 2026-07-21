@@ -110,6 +110,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    private val _infoMessage = MutableStateFlow<String?>(null)
+    val infoMessage: StateFlow<String?> = _infoMessage
+
     private val _successMessage = MutableStateFlow<String?>(null)
     val successMessage: StateFlow<String?> = _successMessage
 
@@ -343,10 +346,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         retryJob?.cancel()
                         retryJob = viewModelScope.launch {
                             for (i in 5 downTo 1) {
-                                _error.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_connection_lost, i, stationRetryCount)
+                                _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_connection_lost, i, stationRetryCount)
                                 delay(1000)
                             }
-                            _error.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_retrying_now)
+                            _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_retrying_now)
                             playStation(station, resetErrors = false)
                         }
                     } else {
@@ -356,6 +359,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             playNext(isAuto = true)
                         } else {
                             _error.value = "Playback failed: ${error.message}"
+                            _infoMessage.value = null
                             stopPlayback()
                             consecutiveErrors = 0
                         }
@@ -366,6 +370,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (isPlaying) {
                         consecutiveErrors = 0
                         _error.value = null
+                        _infoMessage.value = null
                     }
                     _isPlaying.value = isPlaying
                 }
@@ -1021,6 +1026,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() {
         _error.value = null
+    }
+
+    fun clearInfoMessage() {
+        _infoMessage.value = null
     }
 
     fun setSuccess(message: String) {
@@ -1706,6 +1715,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (resetErrors) {
             consecutiveErrors = 0
             stationRetryCount = 0
+            _infoMessage.value = null
         }
         if (station.stationUuid != _currentStation.value?.stationUuid) {
             stationRetryCount = 0
@@ -1831,6 +1841,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         player?.stop()
         _isPlaying.value = false
         _currentStation.value = null
+        _infoMessage.value = null
     }
 
     fun searchStations(query: String) {
