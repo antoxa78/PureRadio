@@ -176,11 +176,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"), Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(stopReceiver, IntentFilter("ACTION_STOP_RADIO"))
-        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this,
+            stopReceiver,
+            IntentFilter("ACTION_STOP_RADIO"),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         setContent {
             val isPip by isInPipMode
             val isInitialized by viewModel.isInitialized.collectAsState()
@@ -251,7 +252,7 @@ class MainActivity : ComponentActivity() {
             val stopIntent = PendingIntent.getBroadcast(
                 this,
                 1,
-                Intent("ACTION_STOP_RADIO"),
+                Intent("ACTION_STOP_RADIO").setPackage(packageName),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             val stopAction = RemoteAction(
@@ -597,11 +598,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val drawerOpenedIntentionally = remember { mutableStateOf(false) }
     BackHandler {
         if (isDrawerOpen) {
-            if (quitConfirmationEnabled) {
-                showExitDialog = true
-            } else {
-                (context as? Activity)?.finish()
-            }
+            drawerState.setValue(DrawerValue.Closed)
         } else {
             when {
                 error != null -> viewModel.cancelRetry()
@@ -675,7 +672,11 @@ fun MainScreen(viewModel: MainViewModel) {
                             onClick = { 
                                 if (item == NavigationItem.Exit) {
                                     drawerState.setValue(DrawerValue.Closed)
-                                    showExitDialog = true
+                                    if (quitConfirmationEnabled) {
+                                        showExitDialog = true
+                                    } else {
+                                        (context as? Activity)?.finish()
+                                    }
                                 } else {
                                     viewModel.selectNavigationItem(item)
                                     drawerState.setValue(DrawerValue.Closed)

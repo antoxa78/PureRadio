@@ -3,6 +3,16 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val releaseSigningProperties = listOf(
+    "RELEASE_STORE_FILE",
+    "RELEASE_STORE_PASSWORD",
+    "RELEASE_KEY_ALIAS",
+    "RELEASE_KEY_PASSWORD"
+).associateWith { name ->
+    providers.gradleProperty(name).orNull ?: System.getenv(name)
+}
+val hasReleaseSigning = releaseSigningProperties.values.all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.toxa.pureradio"
     compileSdk {
@@ -15,17 +25,31 @@ android {
         applicationId = "com.toxa.pureradio"
         minSdk = 28
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.3.9"
+        versionCode = 16
+        versionName = "1.3.10"
 
         buildConfigField("Long", "BUILD_TIME", "${System.currentTimeMillis()}L")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseSigningProperties.getValue("RELEASE_STORE_FILE")!!)
+                storePassword = releaseSigningProperties.getValue("RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSigningProperties.getValue("RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigningProperties.getValue("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            // Never use the shared Android debug key for release artifacts.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

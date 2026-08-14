@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.10] - 2026-08-14
+
+### Fixed
+- **Async Loading**: Prevented stale station and search responses from replacing newer content.
+- **Search and Filtering**: Fixed short-query results, exact genre matching, selected-tag filtering, and pagination.
+- **TV Navigation**: Back now closes the navigation drawer instead of exiting the app.
+- **Reconnect UX**: Canceled reconnect notices are cleared correctly.
+- **Playlist I/O**: Moved import and export file operations off the main thread.
+- **Broadcast Security**: Scoped the PiP stop action to the application and declared the receiver as not exported.
+
+### Security
+- Release builds no longer use the shared Android debug signing key.
+
 ## [1.3.9] - 2026-07-21
 
 ### Improved

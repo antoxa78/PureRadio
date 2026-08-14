@@ -57,7 +57,7 @@ class RadioRepository {
             hideBroken = hideBroken
         )
         
-        val combined = if (query != null && tag == null) {
+        return if (query != null && tag == null) {
             val byTag = service.searchStations(
                 tag = query,
                 country = country,
@@ -66,20 +66,9 @@ class RadioRepository {
                 hideBroken = hideBroken
             )
             (results + byTag).distinctBy { it.stationUuid }
-        } else if (tag != null && query == null) {
-            val byName = service.searchStations(
-                name = tag,
-                country = country,
-                limit = limit,
-                offset = offset,
-                hideBroken = hideBroken
-            )
-            (results + byName).distinctBy { it.stationUuid }
         } else {
             results
         }
-        
-        return combined
     }
 
     suspend fun getStats(): ServerStats? {
