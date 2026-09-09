@@ -1887,12 +1887,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _mediaMetadata.value = null
         _audioFormat.value = null
         // Promote the (already-bound) playback service to a foreground service so audio
-        // survives the app leaving the foreground. This must happen right before play()
-        // so Media3's notification manager calls startForeground() within the OS's window.
-        ContextCompat.startForegroundService(
-            getApplication(),
-            Intent(getApplication(), PlaybackService::class.java)
-        )
+        // survives the app leaving the foreground. The service calls startForeground()
+        // immediately in onStartCommand (see PlaybackService), satisfying the system's
+        // startForegroundService() timeout even while a slow/failing stream is connecting.
+        val startIntent = Intent(getApplication(), PlaybackService::class.java).apply {
+            putExtra(PlaybackService.EXTRA_STATION_NAME, finalStation.name)
+        }
+        ContextCompat.startForegroundService(getApplication(), startIntent)
         player?.let {
             it.stop()
             it.clearMediaItems()
@@ -1900,6 +1901,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val mediaItemBuilder = MediaItem.Builder()
                 .setUri(finalStation.url)
                 .setMediaId(finalStation.stationUuid)
+                .setMediaMetadata(
+                    androidx.media3.common.MediaMetadata.Builder()
+                        .setTitle(finalStation.name)
+                        .build()
+                )
 
             if (finalStation.url.contains("m3u8", ignoreCase = true) ||
                 finalStation.codec.equals("hls", ignoreCase = true)) {

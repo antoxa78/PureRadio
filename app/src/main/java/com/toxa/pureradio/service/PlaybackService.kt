@@ -1,5 +1,8 @@
 package com.toxa.pureradio.service
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.os.Binder
@@ -17,6 +20,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.toxa.pureradio.R
 
 /**
  * Hosts the [ExoPlayer] and [MediaSession] as a proper foreground service so that
@@ -45,11 +49,27 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
         val prefs = getSharedPreferences("pure_radio_prefs", Context.MODE_PRIVATE)
         buildPlayer(
             extraBuffering = prefs.getBoolean("extra_buffering", false),
             audioPassthrough = prefs.getBoolean("audio_passthrough", false)
         )
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // playStation() starts us with startForegroundService(), which requires
+        // startForeground() within the system's timeout. Media3 only promotes the
+        // service to foreground once playback is genuinely active, so a slow or
+        // failing radio stream could leave us outside that window and crash the app.
+        // Calling startForeground() here immediately satisfies the requirement;
+        // Media3 then updates the notification with playback controls once the
+        // session is active.
+        startForeground(
+            NOTIFICATION_ID,
+            placeholderNotification(intent?.getStringExtra(EXTRA_STATION_NAME))
+        )
+        return super.onStartCommand(intent, flags, startId)
     }
 
     /** Current player, or null if the service hasn't finished creating one yet. */
@@ -165,7 +185,31 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.playback_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun placeholderNotification(stationName: String?): Notification {
+        @Suppress("DEPRECATION")
+        return Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle(stationName ?: getString(R.string.playback_notification_placeholder))
+            .setContentText(getString(R.string.playback_notification_connecting))
+            .setSmallIcon(applicationInfo.icon)
+            .setPriority(Notification.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+    }
+
     companion object {
         const val ACTION_LOCAL_BIND = "com.toxa.pureradio.action.LOCAL_BIND"
+        const val EXTRA_STATION_NAME = "com.toxa.pureradio.extra.STATION_NAME"
+        private const val CHANNEL_ID = "playback"
+        private const val NOTIFICATION_ID = 1001
     }
 }

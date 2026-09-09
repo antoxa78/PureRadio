@@ -151,4 +151,7 @@
     <string name="go_to_parent_directory">Перейти в родительскую папку</string>
     <string name="file_type_folder">Папка</string>
     <string name="export_filename_label">Имя файла экспорта:</string>
+    <string name="playback_channel_name">Воспроизведение</string>
+    <string name="playback_notification_placeholder">Pure Radio</string>
+    <string name="playback_notification_connecting">Подключение к станции…</string>
 </resources>

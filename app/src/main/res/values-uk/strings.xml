@@ -151,4 +151,7 @@
     <string name="go_to_parent_directory">Перейти до батьківської папки</string>
     <string name="file_type_folder">Папка</string>
     <string name="export_filename_label">Ім\'я файлу експорту:</string>
+    <string name="playback_channel_name">Відтворення</string>
+    <string name="playback_notification_placeholder">Pure Radio</string>
+    <string name="playback_notification_connecting">Підключення до станції…</string>
 </resources>

@@ -168,4 +168,7 @@
     <string name="go_to_parent_directory">Go to Parent Directory</string>
     <string name="file_type_folder">Folder</string>
     <string name="export_filename_label">Export filename:</string>
+    <string name="playback_channel_name">Playback</string>
+    <string name="playback_notification_placeholder">Pure Radio</string>
+    <string name="playback_notification_connecting">Connecting to station…</string>
 </resources>
