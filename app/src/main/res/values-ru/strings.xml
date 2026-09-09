@@ -52,4 +52,103 @@
     <string name="settings_bg_sync_desc_24">24 часа</string>
     <string name="settings_bg_sync_desc_off">Отключено</string>
     <string name="screensaver_return_hint">Нажмите любую клавишу для выхода</string>
+
+    <string name="splash_tagline">Тысячи станций, бесплатно</string>
+
+    <string name="action_no">Нет</string>
+    <string name="action_yes">Да</string>
+    <string name="action_no_caps">НЕТ</string>
+    <string name="action_yes_caps">ДА</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_cancel_caps">ОТМЕНА</string>
+    <string name="action_back_caps">НАЗАД</string>
+    <string name="action_add_caps">ДОБАВИТЬ</string>
+    <string name="action_remove_caps">УДАЛИТЬ</string>
+    <string name="action_close">Закрыть</string>
+    <string name="action_save_here">СОХРАНИТЬ ЗДЕСЬ</string>
+    <string name="content_desc_back">Назад</string>
+    <string name="content_desc_open">Открыть</string>
+    <string name="content_desc_close">Закрыть</string>
+    <string name="content_desc_previous">Предыдущая</string>
+    <string name="content_desc_next">Следующая</string>
+    <string name="content_desc_favorite">Избранное</string>
+
+    <string name="exit_dialog_title">Выйти из приложения?</string>
+
+    <string name="overwrite_dialog_message">Файл \"%1$s\" уже существует. Перезаписать его?</string>
+
+    <string name="favorite_add_title">Добавить в коллекцию?</string>
+    <string name="favorite_remove_title">Удалить из коллекции?</string>
+
+    <string name="restore_dialog_found_stations">Найдено станций: %1$d. Выберите действие:</string>
+    <string name="restore_action_add">Добавить к текущему избранному</string>
+    <string name="restore_action_replace">Заменить всё избранное</string>
+    <string name="restore_confirm_title">Вы уверены?</string>
+    <string name="restore_confirm_message">Это удалит все ваши текущие избранные станции и заменит их станциями из файла.</string>
+
+    <string name="bitrate_filter_label">Фильтр по битрейту: </string>
+    <string name="bitrate_low">Низкий (&lt;192)</string>
+    <string name="bitrate_high">Высокий (&gt;=192)</string>
+    <string name="bitrate_flac">FLAC</string>
+
+    <string name="genre_badge">ЖАНР</string>
+    <string name="country_badge">СТРАНА</string>
+    <string name="genres_section_header">ЖАНРЫ</string>
+    <string name="count_stations_plain">%1$d станций</string>
+
+    <string name="settings_activate_screensaver">Включить заставку</string>
+    <string name="settings_activate_screensaver_desc">Автоматически включать во время воспроизведения</string>
+    <string name="settings_display_mode">Режим отображения</string>
+    <string name="screensaver_mode_station_info">Ретро-информация о станции</string>
+    <string name="screensaver_mode_black_screen">Чёрный экран (защита OLED)</string>
+    <string name="settings_idle_timeout">Тайм-аут бездействия</string>
+    <string name="minutes_format">%1$d мин</string>
+
+    <string name="theme_modern_blue">Современный синий</string>
+    <string name="theme_retro_gold">Ретро золото</string>
+    <string name="theme_blue_neon">Синий неон</string>
+    <string name="theme_violet">Фиолетовый</string>
+    <string name="theme_monochrome">Монохром</string>
+    <string name="theme_forest">Лес</string>
+    <string name="theme_contrast">Контраст</string>
+    <string name="theme_modern_blue_desc">Стильный синий с высокой контрастностью</string>
+    <string name="theme_retro_gold_desc">Классические золотые и деревянные тона</string>
+    <string name="theme_blue_neon_desc">Холодное синее неоновое свечение</string>
+    <string name="theme_violet_desc">Пурпурные и фиолетовые тона</string>
+    <string name="theme_monochrome_desc">Серый и чёрный</string>
+    <string name="theme_forest_desc">Зелёный и чёрный</string>
+    <string name="theme_contrast_desc">Белый и чёрный</string>
+
+    <string name="language_english">Английский</string>
+    <string name="language_russian">Русский</string>
+    <string name="language_ukrainian">Украинский</string>
+
+    <string name="current_value_format">Текущая: %1$s</string>
+    <string name="currently_value_format">Сейчас: %1$s</string>
+    <string name="update_frequency_format">Частота обновления: %1$s</string>
+    <string name="current_status_format">Текущий статус: %1$s</string>
+
+    <string name="data_management_header">УПРАВЛЕНИЕ ДАННЫМИ</string>
+    <string name="settings_backup_favs_desc">Экспортировать коллекцию через встроенный файловый менеджер</string>
+    <string name="settings_restore_favs">Восстановить избранное</string>
+    <string name="settings_restore_favs_desc">Просмотр локального хранилища через встроенный файловый менеджер</string>
+    <string name="settings_grant_storage">Предоставить доступ к хранилищу</string>
+    <string name="settings_grant_storage_desc">Попробуйте это, если не видите файлы. Откроет системное меню разрешений.</string>
+    <string name="settings_force_refresh">Принудительное обновление базы данных</string>
+    <string name="last_synced_format">Синхронизировано: %1$s • Станций доступно: %2$s</string>
+    <string name="last_synced_never">Никогда</string>
+
+    <string name="interface_content_header">ИНТЕРФЕЙС И КОНТЕНТ</string>
+    <string name="settings_home_curation">Настройка главного экрана</string>
+    <string name="settings_home_curation_desc">Выберите жанры, отображаемые на главной панели</string>
+
+    <string name="loading_ellipsis">Загрузка…</string>
+    <string name="load_more_stations">Загрузить ещё станции</string>
+
+    <string name="pip_unavailable_notice">Режим "картинка в картинке" здесь недоступен, но воспроизведение продолжится в фоновом режиме — управляйте им через уведомление.</string>
+
+    <string name="file_picker_backup_title">Резервное копирование избранного</string>
+    <string name="go_to_parent_directory">Перейти в родительскую папку</string>
+    <string name="file_type_folder">Папка</string>
+    <string name="export_filename_label">Имя файла экспорта:</string>
 </resources>

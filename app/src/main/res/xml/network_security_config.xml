@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Radio stream URLs come from arbitrary, user-selected stations across the public internet
+    (via radio-browser.info) and many of those streams are plain HTTP, so cleartext can't be
+    disabled globally without breaking playback for a large share of stations. The base config
+    below keeps that working exactly as before.
+
+    What this file *does* tighten: the app's own API traffic (radio-browser.info and its
+    mirrors) is pinned to HTTPS-only, so a bug or a future change can't silently send our own
+    search/tag/country/station-lookup requests over cleartext. This directly addresses the
+    "any HTTP request from the app, not just station streams, goes over cleartext" concern,
+    without touching arbitrary stream-domain compatibility.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.radio-browser.info</domain>
+    </domain-config>
+
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

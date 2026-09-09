@@ -15,18 +15,14 @@ val hasReleaseSigning = releaseSigningProperties.values.all { !it.isNullOrBlank(
 
 android {
     namespace = "com.toxa.pureradio"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.toxa.pureradio"
         minSdk = 28
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.3.10"
+        versionCode = 17
+        versionName = "1.3.11"
 
         buildConfigField("Long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }

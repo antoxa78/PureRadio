@@ -52,4 +52,120 @@
     <string name="settings_bg_sync_desc_24">24 Hours</string>
     <string name="settings_bg_sync_desc_off">Disabled</string>
     <string name="screensaver_return_hint">Press any key to return</string>
+
+    <!-- Splash -->
+    <string name="splash_tagline">Thousands of stations, for free</string>
+
+    <!-- Generic actions (kept per call site to preserve each button\'s existing casing) -->
+    <string name="action_no">No</string>
+    <string name="action_yes">Yes</string>
+    <string name="action_no_caps">NO</string>
+    <string name="action_yes_caps">YES</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_cancel_caps">CANCEL</string>
+    <string name="action_back_caps">BACK</string>
+    <string name="action_add_caps">ADD</string>
+    <string name="action_remove_caps">REMOVE</string>
+    <string name="action_close">Close</string>
+    <string name="action_save_here">SAVE HERE</string>
+    <string name="content_desc_back">Back</string>
+    <string name="content_desc_open">Open</string>
+    <string name="content_desc_close">Close</string>
+    <string name="content_desc_previous">Previous</string>
+    <string name="content_desc_next">Next</string>
+    <string name="content_desc_favorite">Favorite</string>
+
+    <!-- Exit dialog -->
+    <string name="exit_dialog_title">Exit The Application?</string>
+
+    <!-- Overwrite-file dialog -->
+    <string name="overwrite_dialog_message">File \"%1$s\" already exists. Overwrite it?</string>
+
+    <!-- Add/remove favourite dialog -->
+    <string name="favorite_add_title">Add to Collection?</string>
+    <string name="favorite_remove_title">Remove from Collection?</string>
+
+    <!-- Restore favourites dialogs -->
+    <string name="restore_dialog_found_stations">Found %1$d stations. Choose action:</string>
+    <string name="restore_action_add">Add to current favorites</string>
+    <string name="restore_action_replace">Replace all favorites</string>
+    <string name="restore_confirm_title">Are you sure?</string>
+    <string name="restore_confirm_message">This will delete all your current favorites and replace them with the ones from the file.</string>
+
+    <!-- Bitrate filter -->
+    <string name="bitrate_filter_label">Filter Stations By Bitrate: </string>
+    <string name="bitrate_low">Low (&lt;192)</string>
+    <string name="bitrate_high">High (&gt;=192)</string>
+    <string name="bitrate_flac">FLAC</string>
+
+    <!-- Genres / Countries -->
+    <string name="genre_badge">GENRE</string>
+    <string name="country_badge">COUNTRY</string>
+    <string name="genres_section_header">GENRES</string>
+    <string name="count_stations_plain">%1$d stations</string>
+
+    <!-- Screensaver settings sub-menu -->
+    <string name="settings_activate_screensaver">Activate Screensaver</string>
+    <string name="settings_activate_screensaver_desc">Automatically engage when music is playing</string>
+    <string name="settings_display_mode">Display Mode</string>
+    <string name="screensaver_mode_station_info">Retro Station Info</string>
+    <string name="screensaver_mode_black_screen">Deep Black (OLED Safe)</string>
+    <string name="settings_idle_timeout">Idle Timeout</string>
+    <string name="minutes_format">%1$d Minutes</string>
+
+    <!-- App theme names/descriptions -->
+    <string name="theme_modern_blue">Modern Blue</string>
+    <string name="theme_retro_gold">Retro Gold</string>
+    <string name="theme_blue_neon">Blue Neon</string>
+    <string name="theme_violet">Violet</string>
+    <string name="theme_monochrome">Monochrome</string>
+    <string name="theme_forest">Forest</string>
+    <string name="theme_contrast">Contrast</string>
+    <string name="theme_modern_blue_desc">Sleek blue with high contrast</string>
+    <string name="theme_retro_gold_desc">Classic gold and wood tones</string>
+    <string name="theme_blue_neon_desc">Cool blue neon glow</string>
+    <string name="theme_violet_desc">Purple and violet tones</string>
+    <string name="theme_monochrome_desc">Grey and black</string>
+    <string name="theme_forest_desc">Green and black</string>
+    <string name="theme_contrast_desc">White and black</string>
+
+    <!-- App language names -->
+    <string name="language_english">English</string>
+    <string name="language_russian">Russian</string>
+    <string name="language_ukrainian">Ukrainian</string>
+
+    <!-- Settings summary lines -->
+    <string name="current_value_format">Current: %1$s</string>
+    <string name="currently_value_format">Currently: %1$s</string>
+    <string name="update_frequency_format">Update frequency: %1$s</string>
+    <string name="current_status_format">Current status: %1$s</string>
+
+    <!-- Settings: data management -->
+    <string name="data_management_header">DATA MANAGEMENT</string>
+    <string name="settings_backup_favs_desc">Export your collection using the built-in file manager</string>
+    <string name="settings_restore_favs">Restore Favourites</string>
+    <string name="settings_restore_favs_desc">Browse local storage using the built-in file manager</string>
+    <string name="settings_grant_storage">Grant Storage Permissions</string>
+    <string name="settings_grant_storage_desc">Try this if you cannot see files. Opens system permissions menu.</string>
+    <string name="settings_force_refresh">Force Database Refresh</string>
+    <string name="last_synced_format">Last synced: %1$s • %2$s Stations available</string>
+    <string name="last_synced_never">Never</string>
+
+    <!-- Settings: interface & content -->
+    <string name="interface_content_header">INTERFACE &amp; CONTENT</string>
+    <string name="settings_home_curation">Home Screen Curation</string>
+    <string name="settings_home_curation_desc">Choose which genres appear on your primary dashboard</string>
+
+    <!-- Load more -->
+    <string name="loading_ellipsis">Loading…</string>
+    <string name="load_more_stations">Load More Stations</string>
+
+    <!-- Picture-in-Picture fallback -->
+    <string name="pip_unavailable_notice">Picture-in-Picture isn\'t available here, but playback will keep going in the background — check the notification to control it.</string>
+
+    <!-- File picker -->
+    <string name="file_picker_backup_title">Backup Favourites</string>
+    <string name="go_to_parent_directory">Go to Parent Directory</string>
+    <string name="file_type_folder">Folder</string>
+    <string name="export_filename_label">Export filename:</string>
 </resources>

@@ -56,8 +56,11 @@ class RadioRepository {
             offset = offset,
             hideBroken = hideBroken
         )
-        
-        return if (query != null && tag == null) {
+
+        // Only fall back to a genre/tag search when the name search came up short of a
+        // full page — most queries that already match plenty of stations by name don't
+        // need a second network round-trip against radio-browser.info.
+        return if (query != null && tag == null && results.size < limit) {
             val byTag = service.searchStations(
                 tag = query,
                 country = country,

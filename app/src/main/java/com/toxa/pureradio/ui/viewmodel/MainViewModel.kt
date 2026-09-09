@@ -1,9 +1,14 @@
 package com.toxa.pureradio.ui.viewmodel
 
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.net.Uri
 import android.os.Environment
+import android.os.IBinder
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
@@ -12,17 +17,11 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.C
-import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.session.MediaSession
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import com.toxa.pureradio.service.PlaybackService
 import com.toxa.pureradio.data.model.Station
 import com.toxa.pureradio.data.repository.RadioRepository
 import com.toxa.pureradio.network.Country
@@ -79,7 +78,8 @@ enum class AppLanguage {
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RadioRepository()
     private var player: ExoPlayer? = null
-    private var mediaSession: MediaSession? = null
+    private var playbackService: PlaybackService? = null
+    private var serviceBound = false
     private val prefs = application.getSharedPreferences("pure_radio_prefs", Context.MODE_PRIVATE)
 
     private val _allStations = MutableStateFlow<List<Station>>(emptyList())
@@ -264,6 +264,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var consecutiveErrors = 0
     private var stationRetryCount = 0
     private var retryJob: kotlinx.coroutines.Job? = null
+    // Clears the retry budget only after playback has stayed up for a while — resetting it
+    // the instant a reconnect succeeds would let a rapidly flapping stream retry forever.
+    private var retryResetJob: kotlinx.coroutines.Job? = null
     private var searchJob: kotlinx.coroutines.Job? = null
     private var contentRequestId = 0L
 
@@ -292,144 +295,122 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    @OptIn(UnstableApi::class)
-    private fun initializePlayer() {
-        val context = getApplication() as Context
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(C.USAGE_MEDIA)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .build()
-
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
-        
-        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-        
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(dataSourceFactory)
-
-        val loadControl = if (_extraBufferingEnabled.value) {
-            DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    30000, // Min buffer 30s
-                    60000, // Max buffer 60s
-                    8000,  // Buffer for playback 8s
-                    12000  // Buffer for playback after rebuffer 12s
-                ).build()
-        } else {
-            DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    15000, // Min buffer 15s
-                    50000, // Max buffer 50s
-                    2500,  // Buffer for playback 2.5s
-                    5000   // Buffer for playback after rebuffer 5s
-                ).build()
+    /**
+     * Shared between the initial player and any player rebuilt later by
+     * [reinitializePlayer] (toggling Extra Buffering / Audio Passthrough swaps in a new
+     * ExoPlayer instance, which starts with no listeners attached).
+     */
+    private val playerListener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            val station = _currentStation.value
+            if (_autoReconnectEnabled.value && station != null && stationRetryCount < 3) {
+                stationRetryCount++
+                _isPlaying.value = false
+                retryJob?.cancel()
+                retryJob = viewModelScope.launch {
+                    for (i in 5 downTo 1) {
+                        _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_connection_lost, i, stationRetryCount)
+                        delay(1000)
+                    }
+                    _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_retrying_now)
+                    playStation(station, resetErrors = false)
+                }
+            } else {
+                consecutiveErrors++
+                stationRetryCount = 0
+                if (consecutiveErrors < 5) {
+                    playNext(isAuto = true)
+                } else {
+                    _error.value = "Playback failed: ${error.message}"
+                    _infoMessage.value = null
+                    stopPlayback()
+                    consecutiveErrors = 0
+                }
+            }
         }
 
-        val builder = ExoPlayer.Builder(context)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .setLoadControl(loadControl)
-        
-        if (_audioPassthrough.value) {
-            val renderersFactory = DefaultRenderersFactory(getApplication())
-                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                .setEnableAudioFloatOutput(true)
-
-            builder.setRenderersFactory(renderersFactory)
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            retryResetJob?.cancel()
+            if (isPlaying) {
+                consecutiveErrors = 0
+                _error.value = null
+                _infoMessage.value = null
+                // Only clear the auto-reconnect budget once the stream has proven itself
+                // stable for a while — see the comment on retryResetJob above.
+                retryResetJob = viewModelScope.launch {
+                    delay(30_000)
+                    stationRetryCount = 0
+                }
+            }
+            _isPlaying.value = isPlaying
         }
 
-        builder.setAudioAttributes(audioAttributes, true)
-        builder.setHandleAudioBecomingNoisy(true)
-        builder.setSkipSilenceEnabled(false)
+        override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+            _mediaMetadata.value = mediaMetadata
+        }
 
-        player = builder.build().apply {
-            // Force 1.0 speed and pitch to ensure no resampling for time-stretching
-            playbackParameters = androidx.media3.common.PlaybackParameters.DEFAULT
-            addListener(object : Player.Listener {
-                override fun onPlayerError(error: PlaybackException) {
-                    val station = _currentStation.value
-                    if (_autoReconnectEnabled.value && station != null && stationRetryCount < 3) {
-                        stationRetryCount++
-                        _isPlaying.value = false
-                        retryJob?.cancel()
-                        retryJob = viewModelScope.launch {
-                            for (i in 5 downTo 1) {
-                                _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_connection_lost, i, stationRetryCount)
-                                delay(1000)
-                            }
-                            _infoMessage.value = getApplication<Application>().getString(com.toxa.pureradio.R.string.error_retrying_now)
-                            playStation(station, resetErrors = false)
-                        }
-                    } else {
-                        consecutiveErrors++
-                        stationRetryCount = 0
-                        if (consecutiveErrors < 5) {
-                            playNext(isAuto = true)
-                        } else {
-                            _error.value = "Playback failed: ${error.message}"
-                            _infoMessage.value = null
-                            stopPlayback()
-                            consecutiveErrors = 0
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            // Try to extract format info from the active audio track
+            for (group in tracks.groups) {
+                if (group.type == C.TRACK_TYPE_AUDIO && group.isSelected) {
+                    for (i in 0 until group.length) {
+                        if (group.isTrackSelected(i)) {
+                            _audioFormat.value = group.getTrackFormat(i)
+                            break
                         }
                     }
                 }
-
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (isPlaying) {
-                        consecutiveErrors = 0
-                        _error.value = null
-                        _infoMessage.value = null
-                    }
-                    _isPlaying.value = isPlaying
-                }
-
-                override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
-                    _mediaMetadata.value = mediaMetadata
-                }
-
-                override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                    // Try to extract format info from the active audio track
-                    for (group in tracks.groups) {
-                        if (group.type == C.TRACK_TYPE_AUDIO && group.isSelected) {
-                            for (i in 0 until group.length) {
-                                if (group.isTrackSelected(i)) {
-                                    _audioFormat.value = group.getTrackFormat(i)
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-            })
+            }
         }
-        mediaSession = MediaSession.Builder(context, player!!).build()
     }
 
-    private fun reinitializePlayer() {
-        val wasPlaying = _isPlaying.value
-        val currentPos = player?.currentPosition ?: 0L
-        val currentItem = player?.currentMediaItem
-
-        mediaSession?.release()
-        mediaSession = null
-        player?.release()
-        player = null
-        initializePlayer()
-
-        if (currentItem != null) {
-            player?.setMediaItem(currentItem)
-            player?.seekTo(currentPos)
-            player?.prepare()
-            if (wasPlaying) {
-                player?.play()
-                _isPlaying.value = true
-            } else {
-                _isPlaying.value = false
-            }
-        } else {
-            _isPlaying.value = false
+    private val playbackServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val localBinder = binder as? PlaybackService.LocalBinder ?: return
+            val service = localBinder.getService()
+            playbackService = service
+            serviceBound = true
+            val connectedPlayer = service.getPlayer()
+            player = connectedPlayer
+            connectedPlayer?.addListener(playerListener)
         }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            player?.removeListener(playerListener)
+            player = null
+            playbackService = null
+            serviceBound = false
+        }
+    }
+
+    /**
+     * Binds to [PlaybackService], which owns the real ExoPlayer + MediaSession, so playback
+     * keeps running (with a proper foreground-service notification) even after this
+     * ViewModel's Activity leaves the foreground. Binding alone doesn't make the service a
+     * foreground service — that only happens once [playStation] starts the service — so
+     * this is safe to call unconditionally on init without risking an ANR.
+     */
+    @OptIn(UnstableApi::class)
+    private fun initializePlayer() {
+        val context = getApplication<Application>()
+        context.bindService(
+            Intent(context, PlaybackService::class.java),
+            playbackServiceConnection,
+            Context.BIND_AUTO_CREATE
+        )
+    }
+
+    /** Rebuilds the ExoPlayer inside the service with new buffering/passthrough settings. */
+    private fun reinitializePlayer() {
+        val service = playbackService ?: return
+        player?.removeListener(playerListener)
+        val newPlayer = service.buildPlayer(
+            extraBuffering = _extraBufferingEnabled.value,
+            audioPassthrough = _audioPassthrough.value
+        )
+        newPlayer.addListener(playerListener)
+        player = newPlayer
+        _isPlaying.value = newPlayer.isPlaying
     }
 
     fun toggleAudioPassthrough() {
@@ -643,13 +624,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Percent-encodes a value for use inside the `;`-and-`=`-delimited
+     * `#EXT-X-PURE-RADIO-DATA:` line, so a station name/tag/etc. containing a literal `;`
+     * or `=` can't desync the key/value pairs on re-import. Paired with [decodePlaylistField].
+     */
+    private fun encodePlaylistField(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
+
+    /** Reverses [encodePlaylistField], tolerating plain (older, un-encoded) values. */
+    private fun decodePlaylistField(value: String): String =
+        try { java.net.URLDecoder.decode(value, "UTF-8") } catch (e: Exception) { value }
+
     private fun generateM3uContent(): String {
         val stations = _favoriteStations.value
         val content = StringBuilder("#EXTM3U\n")
         stations.forEach { station ->
-            content.append("#EXTINF:-1 tvg-id=\"${station.stationUuid}\" tvg-logo=\"${station.favicon}\" group-title=\"${station.tags}\" tvg-country=\"${station.countryCode ?: ""}\",${station.name}\n")
-            // Custom tag for full station metadata recovery
-            content.append("#EXT-X-PURE-RADIO-DATA:uuid=${station.stationUuid};name=${station.name};favicon=${station.favicon};tags=${station.tags};country=${station.country};countrycode=${station.countryCode ?: ""};lang=${station.language};votes=${station.votes};codec=${station.codec};bitrate=${station.bitrate}\n")
+            // Commas delimit the title in the standard EXTINF format, so a comma in the
+            // station name would otherwise get read back by other players (and our own
+            // fallback parsing) as ending the title early.
+            val extinfSafeName = station.name.replace(",", " ").replace("\n", " ")
+            content.append("#EXTINF:-1 tvg-id=\"${station.stationUuid}\" tvg-logo=\"${station.favicon}\" group-title=\"${station.tags}\" tvg-country=\"${station.countryCode ?: ""}\",$extinfSafeName\n")
+            // Custom tag for full station metadata recovery. Every field is percent-encoded
+            // so a name/tag containing ';' or '=' can't corrupt the other fields on import.
+            content.append(
+                "#EXT-X-PURE-RADIO-DATA:" +
+                    "uuid=${encodePlaylistField(station.stationUuid)};" +
+                    "name=${encodePlaylistField(station.name)};" +
+                    "favicon=${encodePlaylistField(station.favicon)};" +
+                    "tags=${encodePlaylistField(station.tags)};" +
+                    "country=${encodePlaylistField(station.country)};" +
+                    "countrycode=${encodePlaylistField(station.countryCode ?: "")};" +
+                    "lang=${encodePlaylistField(station.language)};" +
+                    "votes=${station.votes};" +
+                    "codec=${encodePlaylistField(station.codec ?: "")};" +
+                    "bitrate=${station.bitrate}\n"
+            )
             content.append("${station.url}\n")
         }
         return content.toString()
@@ -736,10 +746,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val trimmedLine = line.trim()
             when {
                 trimmedLine.startsWith("#EXT-X-PURE-RADIO-DATA:") -> {
+                    // Fields are percent-encoded on export (see generateM3uContent) so a
+                    // ';' or '=' inside a value can't be mistaken for a field separator.
                     val data = trimmedLine.removePrefix("#EXT-X-PURE-RADIO-DATA:").split(";")
                     val map = data.associate {
                         val parts = it.split("=", limit = 2)   // limit=2 preserves = inside URLs/values
-                        if (parts.size == 2) parts[0] to parts[1] else "" to ""
+                        if (parts.size == 2) parts[0] to decodePlaylistField(parts[1]) else "" to ""
                     }
                     currentUuid = map["uuid"] ?: ""
                     currentName = map["name"] ?: ""
@@ -1267,8 +1279,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Guards loadMoreStations re-entrancy on its own, synchronously, rather than relying
+    // solely on _isLoading — that flag is also flipped by unrelated loads elsewhere, and
+    // since it's only set inside the launched coroutine, two near-simultaneous callers
+    // (e.g. applyFilters()'s auto-backfill firing while a chained page is already in
+    // flight) could otherwise both pass the check before either sets it.
+    private var loadingMoreStations = false
+
     fun loadMoreStations(remainingRetries: Int = 0) {
-        if (!_hasMoreStations.value || _isLoading.value) return
+        if (!_hasMoreStations.value || _isLoading.value || loadingMoreStations) return
+        loadingMoreStations = true
         val requestId = contentRequestId
         viewModelScope.launch {
             _isLoading.value = true
@@ -1321,6 +1341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (isCurrentContentRequest(requestId)) {
                     _isLoading.value = false
                 }
+                loadingMoreStations = false
             }
 
             // Chain more pages if filtered count is still low
@@ -1851,19 +1872,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
         _mediaMetadata.value = null
         _audioFormat.value = null
+        // Promote the (already-bound) playback service to a foreground service so audio
+        // survives the app leaving the foreground. This must happen right before play()
+        // so Media3's notification manager calls startForeground() within the OS's window.
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), PlaybackService::class.java)
+        )
         player?.let {
             it.stop()
             it.clearMediaItems()
-            
+
             val mediaItemBuilder = MediaItem.Builder()
                 .setUri(finalStation.url)
                 .setMediaId(finalStation.stationUuid)
-            
-            if (finalStation.url.contains("m3u8", ignoreCase = true) || 
+
+            if (finalStation.url.contains("m3u8", ignoreCase = true) ||
                 finalStation.codec.equals("hls", ignoreCase = true)) {
                 mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
             }
-            
+
             it.setMediaItem(mediaItemBuilder.build())
             it.prepare()
             it.play()
@@ -1952,10 +1980,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopPlayback() {
         retryJob?.cancel()
+        retryResetJob?.cancel()
         player?.stop()
         _isPlaying.value = false
         _currentStation.value = null
         _infoMessage.value = null
+        // Drop the service out of the foreground now that nothing is playing and nothing
+        // will auto-resume. The service (and player) stay alive as long as we're still
+        // bound, so the next playStation() call is instant.
+        getApplication<Application>().stopService(Intent(getApplication(), PlaybackService::class.java))
     }
 
     fun searchStations(query: String) {
@@ -1995,9 +2028,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        mediaSession?.release()
-        mediaSession = null
-        player?.release()
+        retryJob?.cancel()
+        retryResetJob?.cancel()
+        player?.removeListener(playerListener)
+        if (serviceBound) {
+            getApplication<Application>().unbindService(playbackServiceConnection)
+            serviceBound = false
+        }
+        // Deliberately not releasing/stopping the player here: the service owns its
+        // lifecycle now, so playback keeps running if this ViewModel is only being
+        // cleared because its Activity is being recreated or backgrounded. Explicit
+        // "stop the app" flows (Exit, the PiP stop action) already call stopPlayback().
         player = null
+        playbackService = null
     }
 }

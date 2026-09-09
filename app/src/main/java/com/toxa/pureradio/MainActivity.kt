@@ -2,6 +2,8 @@ package com.toxa.pureradio
 
 import android.os.Bundle
 import android.net.Uri
+import android.content.pm.PackageManager
+import android.widget.Toast
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
 import android.graphics.drawable.Icon
@@ -163,6 +165,11 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val isInPipMode = mutableStateOf(false)
+    // Shown at most once per process: reassures the user that leaving the app doesn't
+    // stop playback even when Picture-in-Picture itself can't be entered (older devices,
+    // PiP disabled by the user/OEM, etc.) — audio keeps going via PlaybackService's
+    // foreground notification either way.
+    private var pipFallbackNoticeShown = false
 
     private val stopReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -187,7 +194,10 @@ class MainActivity : ComponentActivity() {
             val isInitialized by viewModel.isInitialized.collectAsState()
             var splashElapsed by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
-                delay(3000)
+                // A brief minimum so the splash doesn't just flash by, but short enough
+                // that it doesn't add a flat multi-second delay to every single launch —
+                // isInitialized (from the ViewModel) still gates it on top of this.
+                delay(1200)
                 splashElapsed = true
             }
             val showSplash by remember { derivedStateOf { !isInitialized || !splashElapsed } }
@@ -247,6 +257,15 @@ class MainActivity : ComponentActivity() {
     private fun updatePipParams() {
         if (viewModel.isPlaying.value) {
             val station = viewModel.currentStation.value ?: return
+
+            // PiP genuinely isn't available on this device/config (older API, feature
+            // disabled by the OEM or the user, etc). Don't bother building params we
+            // know will fail — just reassure the user once that audio keeps playing
+            // via the notification instead of silently doing nothing.
+            if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                showPipFallbackNoticeOnce()
+                return
+            }
             val metadata = viewModel.mediaMetadata.value
             
             val stopIntent = PendingIntent.getBroadcast(
@@ -294,15 +313,30 @@ class MainActivity : ComponentActivity() {
                 setPictureInPictureParams(params)
             } catch (e: Exception) {
                 // Fallback for older versions if setPictureInPictureParams fails
+                showPipFallbackNoticeOnce()
             }
-            
+
             // For Android 14+ we call enterPictureInPictureMode manually if not auto-triggered
             if (android.os.Build.VERSION.SDK_INT >= 34) {
                  try {
                      enterPictureInPictureMode(params)
-                 } catch (e: Exception) {}
+                 } catch (e: Exception) {
+                     showPipFallbackNoticeOnce()
+                 }
             }
         }
+    }
+
+    /**
+     * Lets the user know — once per process — that leaving the app is safe even when PiP
+     * can't be entered: playback continues in the background via [PlaybackService]'s
+     * notification, it just won't show the floating PiP window on top of whatever they
+     * switch to.
+     */
+    private fun showPipFallbackNoticeOnce() {
+        if (pipFallbackNoticeShown) return
+        pipFallbackNoticeShown = true
+        Toast.makeText(this, getString(R.string.pip_unavailable_notice), Toast.LENGTH_LONG).show()
     }
 
     override fun onPictureInPictureModeChanged(
@@ -376,13 +410,13 @@ fun PipContent(viewModel: MainViewModel) {
                 ) {
                     Icon(
                         Icons.Default.OpenInFull,
-                        contentDescription = "Open",
+                        contentDescription = stringResource(R.string.content_desc_open),
                         modifier = Modifier.size(24.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Icon(
                         Icons.Default.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.content_desc_close),
                         modifier = Modifier.size(24.dp),
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                     )
@@ -482,13 +516,60 @@ fun SplashScreen() {
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Thousands of stations, for free",
+                text = stringResource(R.string.splash_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 color = androidx.compose.ui.graphics.Color(0xFFB0BEC5),
                 modifier = Modifier.graphicsLayer { alpha = subAlpha.value }
             )
         }
     }
+}
+
+/**
+ * Single source of truth for a [NavigationItem]'s localized display name — used by the
+ * nav drawer, the page title, and the "Startup Category" settings picker, so all three
+ * always show the same (translated) text instead of each keeping its own copy.
+ */
+@Composable
+fun navigationItemLabel(item: NavigationItem): String = when (item) {
+    NavigationItem.Home -> stringResource(R.string.nav_home)
+    NavigationItem.Popular -> stringResource(R.string.nav_popular)
+    NavigationItem.Recent -> stringResource(R.string.nav_recent)
+    NavigationItem.Search -> stringResource(R.string.nav_search)
+    NavigationItem.Genres -> stringResource(R.string.nav_genres)
+    NavigationItem.Countries -> stringResource(R.string.nav_countries)
+    NavigationItem.Favourites -> stringResource(R.string.nav_favourites)
+    NavigationItem.Settings -> stringResource(R.string.nav_settings)
+    NavigationItem.Exit -> stringResource(R.string.nav_exit)
+}
+
+@Composable
+fun appThemeDisplayName(theme: AppTheme): String = when (theme) {
+    AppTheme.ModernBlue -> stringResource(R.string.theme_modern_blue)
+    AppTheme.RetroGold -> stringResource(R.string.theme_retro_gold)
+    AppTheme.BlueNeon -> stringResource(R.string.theme_blue_neon)
+    AppTheme.Violet -> stringResource(R.string.theme_violet)
+    AppTheme.Monochrome -> stringResource(R.string.theme_monochrome)
+    AppTheme.Forest -> stringResource(R.string.theme_forest)
+    AppTheme.Contrast -> stringResource(R.string.theme_contrast)
+}
+
+@Composable
+fun appThemeDescription(theme: AppTheme): String = when (theme) {
+    AppTheme.ModernBlue -> stringResource(R.string.theme_modern_blue_desc)
+    AppTheme.RetroGold -> stringResource(R.string.theme_retro_gold_desc)
+    AppTheme.BlueNeon -> stringResource(R.string.theme_blue_neon_desc)
+    AppTheme.Violet -> stringResource(R.string.theme_violet_desc)
+    AppTheme.Monochrome -> stringResource(R.string.theme_monochrome_desc)
+    AppTheme.Forest -> stringResource(R.string.theme_forest_desc)
+    AppTheme.Contrast -> stringResource(R.string.theme_contrast_desc)
+}
+
+@Composable
+fun appLanguageDisplayName(language: AppLanguage): String = when (language) {
+    AppLanguage.English -> stringResource(R.string.language_english)
+    AppLanguage.Russian -> stringResource(R.string.language_russian)
+    AppLanguage.Ukrainian -> stringResource(R.string.language_ukrainian)
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -543,6 +624,22 @@ fun MainScreen(viewModel: MainViewModel) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
+    // Needed to show the playback notification (lock-screen / notification-shade controls)
+    // from the foreground playback service on Android 13+. Playback itself doesn't depend
+    // on this being granted — only the visible notification does.
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val notificationPermission = android.Manifest.permission.POST_NOTIFICATIONS
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, notificationPermission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(notificationPermission)
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -675,6 +772,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                     if (quitConfirmationEnabled) {
                                         showExitDialog = true
                                     } else {
+                                        viewModel.stopPlayback()
                                         (context as? Activity)?.finish()
                                     }
                                 } else {
@@ -708,17 +806,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 )
                             }
                         ) {
-                            val label = when (item) {
-                                NavigationItem.Home -> stringResource(R.string.nav_home)
-                                NavigationItem.Popular -> stringResource(R.string.nav_popular)
-                                NavigationItem.Recent -> stringResource(R.string.nav_recent)
-                                NavigationItem.Search -> stringResource(R.string.nav_search)
-                                NavigationItem.Genres -> stringResource(R.string.nav_genres)
-                                NavigationItem.Countries -> stringResource(R.string.nav_countries)
-                                NavigationItem.Favourites -> stringResource(R.string.nav_favourites)
-                                NavigationItem.Settings -> stringResource(R.string.nav_settings)
-                                NavigationItem.Exit -> stringResource(R.string.nav_exit)
-                            }
+                            val label = navigationItemLabel(item)
                             Text(
                                 label,
                                 maxLines = 1,
@@ -744,17 +832,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         val stationsText = stringResource(R.string.stations_count, stations.size)
                         "$name $stationsText"
                     }
-                    else -> when (selectedNavItem) {
-                        NavigationItem.Home -> stringResource(R.string.nav_home)
-                        NavigationItem.Popular -> stringResource(R.string.nav_popular)
-                        NavigationItem.Recent -> stringResource(R.string.nav_recent)
-                        NavigationItem.Search -> stringResource(R.string.nav_search)
-                        NavigationItem.Genres -> stringResource(R.string.nav_genres)
-                        NavigationItem.Countries -> stringResource(R.string.nav_countries)
-                        NavigationItem.Favourites -> stringResource(R.string.nav_favourites)
-                        NavigationItem.Settings -> stringResource(R.string.nav_settings)
-                        NavigationItem.Exit -> stringResource(R.string.nav_exit)
-                    }
+                    else -> navigationItemLabel(selectedNavItem)
                 }
                 val isDeepDive = selectedTag != null || selectedCountry != null
                 
@@ -772,7 +850,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             modifier = Modifier.padding(end = 12.dp)
                         ) {
                             Text(
-                                text = if (selectedTag != null) "GENRE" else "COUNTRY",
+                                text = if (selectedTag != null) stringResource(R.string.genre_badge) else stringResource(R.string.country_badge),
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 fontWeight = FontWeight.Bold
@@ -938,7 +1016,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 )
                                                 )
                                                 Spacer(modifier = Modifier.width(16.dp))
-                                                Text("Sort: ", style = MaterialTheme.typography.labelLarge)
+                                                Text(stringResource(R.string.sort_label), style = MaterialTheme.typography.labelLarge)
                                                 com.toxa.pureradio.ui.viewmodel.GenreSortMode.entries.forEach { mode ->
                                                     Button(
                                                         onClick = { viewModel.setGenreSortMode(mode) },
@@ -952,7 +1030,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                             androidx.tv.material3.ButtonDefaults.colors()
                                                         }
                                                     ) {
-                                                        Text(if (mode == com.toxa.pureradio.ui.viewmodel.GenreSortMode.Name) "Name" else "Count")
+                                                        Text(if (mode == com.toxa.pureradio.ui.viewmodel.GenreSortMode.Name) stringResource(R.string.sort_name) else stringResource(R.string.sort_count))
                                                     }
                                                 }
                                             }
@@ -1196,7 +1274,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(stringResource(R.string.dialog_overwrite_backup), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        "File \"${file.name}\" already exists. Overwrite it?",
+                        stringResource(R.string.overwrite_dialog_message, file.name),
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(vertical = 16.dp)
@@ -1206,14 +1284,14 @@ fun MainScreen(viewModel: MainViewModel) {
                             onClick = { viewModel.cancelOverwrite() },
                             modifier = Modifier.weight(1f).focusRequester(overwriteFocusRequester)
                         ) {
-                            Text("No", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_no), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
                             onClick = { viewModel.confirmOverwrite() },
                             modifier = Modifier.weight(1f),
                             colors = androidx.tv.material3.ButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Text("Yes", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_yes), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                     }
                     LaunchedEffect(Unit) {
@@ -1261,7 +1339,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = if (isAlreadyFavorite) "Remove from Collection?" else "Add to Collection?",
+                        text = if (isAlreadyFavorite) stringResource(R.string.favorite_remove_title) else stringResource(R.string.favorite_add_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1286,7 +1364,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         ) {
-                            Text("CANCEL", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_cancel_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
                             onClick = {
@@ -1302,7 +1380,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         ) {
                             Text(
-                                if (isAlreadyFavorite) "REMOVE" else "ADD",
+                                if (isAlreadyFavorite) stringResource(R.string.action_remove_caps) else stringResource(R.string.action_add_caps),
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 fontWeight = FontWeight.Bold
@@ -1377,7 +1455,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         ) {
-                            Text("BACK", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_back_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
                             onClick = {
@@ -1393,7 +1471,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         ) {
                             Text(
-                                "ADD",
+                                stringResource(R.string.action_add_caps),
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 fontWeight = FontWeight.Bold
@@ -1471,7 +1549,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         ) {
-                            Text("BACK", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_back_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
                             onClick = {
@@ -1487,7 +1565,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         ) {
                             Text(
-                                "REMOVE",
+                                stringResource(R.string.action_remove_caps),
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 fontWeight = FontWeight.Bold
@@ -1540,7 +1618,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "Exit The Application?",
+                        text = stringResource(R.string.exit_dialog_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1558,17 +1636,20 @@ fun MainScreen(viewModel: MainViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         ) {
-                            Text("NO", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_no_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
-                            onClick = { (context as? Activity)?.finish() },
+                            onClick = {
+                                viewModel.stopPlayback()
+                                (context as? Activity)?.finish()
+                            },
                             modifier = Modifier.weight(1f).focusRequester(exitYesFocusRequester),
                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = MaterialTheme.colorScheme.onError
                             )
                         ) {
-                            Text("YES", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.action_yes_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
                         }
                     }
                     LaunchedEffect(Unit) {
@@ -1600,28 +1681,28 @@ fun MainScreen(viewModel: MainViewModel) {
                     Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Restore Favourites", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("Found ${stations.size} stations. Choose action:", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
-                        
+                        Text(stringResource(R.string.settings_restore_favs), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.restore_dialog_found_stations, stations.size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+
                         Button(
                             onClick = { viewModel.confirmRestore(replace = false) },
                             modifier = Modifier.fillMaxWidth().focusRequester(restoreFocusRequester)
                         ) {
-                            Text("Add to current favorites", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.restore_action_add), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = { showConfirmation = true },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Replace all favorites", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.restore_action_replace), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = { viewModel.cancelRestore() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Cancel", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Text(stringResource(R.string.action_cancel), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         
                         LaunchedEffect(Unit) {
@@ -1647,9 +1728,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Are you sure?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("This will delete all your current favorites and replace them with the ones from the file.", 
-                            style = MaterialTheme.typography.bodyMedium, 
+                        Text(stringResource(R.string.restore_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.restore_confirm_message),
+                            style = MaterialTheme.typography.bodyMedium,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
@@ -1659,14 +1740,14 @@ fun MainScreen(viewModel: MainViewModel) {
                                 onClick = { showConfirmation = false },
                                 modifier = Modifier.weight(1f).focusRequester(restoreFocusRequester)
                             ) {
-                                Text("No", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text(stringResource(R.string.action_no), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                             Button(
                                 onClick = { viewModel.confirmRestore(replace = true) },
                                 modifier = Modifier.weight(1f),
                                 colors = androidx.tv.material3.ButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.error)
                             ) {
-                                Text("Yes", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text(stringResource(R.string.action_yes), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                         }
                         
@@ -1687,12 +1768,12 @@ fun BitrateFilters(
     onToggleFilter: (BitrateFilter) -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Filter Stations By Bitrate: ", style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.bitrate_filter_label), style = MaterialTheme.typography.labelLarge)
         BitrateFilter.entries.forEach { filter ->
             val label = when (filter) {
-                BitrateFilter.Low -> "Low (<192)"
-                BitrateFilter.High -> "High (>=192)"
-                BitrateFilter.FLAC -> "FLAC"
+                BitrateFilter.Low -> stringResource(R.string.bitrate_low)
+                BitrateFilter.High -> stringResource(R.string.bitrate_high)
+                BitrateFilter.FLAC -> stringResource(R.string.bitrate_flac)
             }
             val isSelected = selectedBitrates.contains(filter)
             Button(
@@ -1774,7 +1855,7 @@ fun SettingsScreen(
                             onClick = { viewModel.setSettingsSubMenu(null) },
                             modifier = Modifier.focusRequester(subMenuFocusRequester)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_personalize_home), style = MaterialTheme.typography.headlineMedium)
@@ -1824,20 +1905,20 @@ fun SettingsScreen(
                 }
                 
                 item {
-                    Text("GENRES", style = MaterialTheme.typography.titleMedium, 
+                    Text(stringResource(R.string.genres_section_header), style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
                         color = MaterialTheme.colorScheme.primary)
                 }
-                
+
                 items(filteredTags) { tag ->
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleGenreVisibility(tag.name) },
-                        headlineContent = { 
-                            Text(tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }) 
+                        headlineContent = {
+                            Text(tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } })
                         },
                         supportingContent = {
-                            Text("${tag.stationcount} stations")
+                            Text(stringResource(R.string.count_stations_plain, tag.stationcount))
                         },
                         trailingContent = {
                             Checkbox(checked = visibleGenres.contains(tag.name), onCheckedChange = null)
@@ -1857,7 +1938,7 @@ fun SettingsScreen(
                         Button(
                             onClick = { viewModel.setSettingsSubMenu(null) }
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_db_update_interval), style = MaterialTheme.typography.headlineMedium)
@@ -1899,7 +1980,7 @@ fun SettingsScreen(
                         Button(
                             onClick = { viewModel.setSettingsSubMenu(null) }
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_screensaver_prefs), style = MaterialTheme.typography.headlineMedium)
@@ -1911,25 +1992,25 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.toggleScreensaver(!screensaverEnabled) },
                         modifier = Modifier.focusRequester(subMenuFocusRequester),
-                        headlineContent = { Text("Activate Screensaver") },
-                        supportingContent = { Text("Automatically engage when music is playing") },
+                        headlineContent = { Text(stringResource(R.string.settings_activate_screensaver)) },
+                        supportingContent = { Text(stringResource(R.string.settings_activate_screensaver_desc)) },
                         trailingContent = {
                             Switch(checked = screensaverEnabled, onCheckedChange = null)
                         }
                     )
                 }
                 item {
-                    Text("Display Mode", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.settings_display_mode), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
                 }
                 val modes = listOf(
-                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.StationInfo to "Retro Station Info",
-                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.BlackScreen to "Deep Black (OLED Safe)"
+                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.StationInfo to R.string.screensaver_mode_station_info,
+                    com.toxa.pureradio.ui.viewmodel.ScreensaverMode.BlackScreen to R.string.screensaver_mode_black_screen
                 )
-                items(modes) { (mode, label) ->
+                items(modes) { (mode, labelRes) ->
                     ListItem(
                         selected = screensaverMode == mode,
                         onClick = { viewModel.setScreensaverMode(mode) },
-                        headlineContent = { Text(label) },
+                        headlineContent = { Text(stringResource(labelRes)) },
                         trailingContent = {
                             if (screensaverMode == mode) {
                                 Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -1938,7 +2019,7 @@ fun SettingsScreen(
                     )
                 }
                 item {
-                    Text("Idle Timeout", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.settings_idle_timeout), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
                 }
                 val timeouts = listOf(1, 5, 10, 20, 30)
                 items(timeouts) { minutes ->
@@ -1948,7 +2029,7 @@ fun SettingsScreen(
                             viewModel.setScreensaverTimeout(minutes)
                             viewModel.setSettingsSubMenu(null)
                         },
-                        headlineContent = { Text("$minutes Minutes") },
+                        headlineContent = { Text(stringResource(R.string.minutes_format, minutes)) },
                         trailingContent = {
                             if (screensaverTimeout == minutes) {
                                 Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -1969,7 +2050,7 @@ fun SettingsScreen(
                             onClick = { viewModel.setSettingsSubMenu(null) },
                             modifier = Modifier.focusRequester(subMenuFocusRequester)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_app_theme), style = MaterialTheme.typography.headlineMedium)
@@ -1977,24 +2058,8 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(24.dp))
                 }
                 items(AppTheme.entries) { theme ->
-                    val label = when (theme) {
-                        AppTheme.ModernBlue -> "Modern Blue"
-                        AppTheme.RetroGold -> "Retro Gold"
-                        AppTheme.BlueNeon -> "Blue Neon"
-                        AppTheme.Violet -> "Violet"
-                        AppTheme.Monochrome -> "Monochrome"
-                        AppTheme.Forest -> "Forest"
-                        AppTheme.Contrast -> "Contrast"
-                    }
-                    val desc = when (theme) {
-                        AppTheme.ModernBlue -> "Sleek blue with high contrast"
-                        AppTheme.RetroGold -> "Classic gold and wood tones"
-                        AppTheme.BlueNeon -> "Cool blue neon glow"
-                        AppTheme.Violet -> "Purple and violet tones"
-                        AppTheme.Monochrome -> "Grey and black"
-                        AppTheme.Forest -> "Green and black"
-                        AppTheme.Contrast -> "White and black"
-                    }
+                    val label = appThemeDisplayName(theme)
+                    val desc = appThemeDescription(theme)
                     ListItem(
                         selected = appTheme == theme,
                         onClick = { viewModel.setAppTheme(theme) },
@@ -2020,7 +2085,7 @@ fun SettingsScreen(
                             onClick = { viewModel.setSettingsSubMenu(null) },
                             modifier = Modifier.focusRequester(subMenuFocusRequester)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_app_language), style = MaterialTheme.typography.headlineMedium)
@@ -2031,7 +2096,7 @@ fun SettingsScreen(
                     ListItem(
                         selected = appLanguage == language,
                         onClick = { viewModel.setAppLanguage(language) },
-                        headlineContent = { Text(language.name) },
+                        headlineContent = { Text(appLanguageDisplayName(language)) },
                         trailingContent = {
                             if (appLanguage == language) {
                                 Icon(Icons.Default.Public, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -2052,7 +2117,7 @@ fun SettingsScreen(
                             onClick = { viewModel.setSettingsSubMenu(null) },
                             modifier = Modifier.focusRequester(subMenuFocusRequester)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_desc_back))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(stringResource(R.string.settings_startup_category), style = MaterialTheme.typography.headlineMedium)
@@ -2067,7 +2132,7 @@ fun SettingsScreen(
                             viewModel.setDefaultCategory(item)
                             viewModel.setSettingsSubMenu(null)
                         },
-                        headlineContent = { Text(item.name) },
+                        headlineContent = { Text(navigationItemLabel(item)) },
                         trailingContent = {
                             if (defaultCategory == item) {
                                 Icon(Icons.Default.Home, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -2094,16 +2159,7 @@ fun SettingsScreen(
                         modifier = Modifier.focusRequester(mainMenuFocusRequester),
                         headlineContent = { Text(stringResource(R.string.settings_app_theme)) },
                         supportingContent = {
-                            val label = when (appTheme) {
-                                AppTheme.ModernBlue -> "Modern Blue"
-                                AppTheme.RetroGold -> "Retro Gold"
-                                AppTheme.BlueNeon -> "Blue Neon"
-                                AppTheme.Violet -> "Violet"
-                                AppTheme.Monochrome -> "Monochrome"
-                                AppTheme.Forest -> "Forest"
-                                AppTheme.Contrast -> "Contrast"
-                            }
-                            Text("Current: $label")
+                            Text(stringResource(R.string.current_value_format, appThemeDisplayName(appTheme)))
                         },
                         leadingContent = { Icon(Icons.Default.TheaterComedy, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
@@ -2115,7 +2171,7 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AppLanguage") },
                         headlineContent = { Text(stringResource(R.string.settings_app_language)) },
-                        supportingContent = { Text("Current: ${appLanguage.name}") },
+                        supportingContent = { Text(stringResource(R.string.current_value_format, appLanguageDisplayName(appLanguage))) },
                         leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
@@ -2126,7 +2182,7 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("DefaultCategory") },
                         headlineContent = { Text(stringResource(R.string.settings_startup_category)) },
-                        supportingContent = { Text("Currently: ${defaultCategory.name}") },
+                        supportingContent = { Text(stringResource(R.string.currently_value_format, navigationItemLabel(defaultCategory))) },
                         leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
@@ -2178,7 +2234,7 @@ fun SettingsScreen(
                         headlineContent = { Text(stringResource(R.string.settings_ambient_screensaver)) },
                         supportingContent = {
                             val label = if (screensaverEnabled) stringResource(R.string.settings_ambient_screensaver_desc_enabled, screensaverTimeout) else stringResource(R.string.settings_ambient_screensaver_desc_disabled)
-                            Text("Current status: $label")
+                            Text(stringResource(R.string.current_status_format, label))
                         },
                         leadingContent = { Icon(Icons.Default.MusicVideo, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
@@ -2236,7 +2292,7 @@ fun SettingsScreen(
                                 24 -> stringResource(R.string.settings_bg_sync_desc_24)
                                 else -> stringResource(R.string.settings_bg_sync_desc_off)
                             }
-                            Text("Update frequency: $label") 
+                            Text(stringResource(R.string.update_frequency_format, label))
                         },
                         leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
@@ -2244,32 +2300,32 @@ fun SettingsScreen(
                 }
 
                 item {
-                    Text("DATA MANAGEMENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
-                    
+                    Text(stringResource(R.string.data_management_header), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+
                     ListItem(
                         selected = false,
-                        onClick = { 
+                        onClick = {
                             viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
                         },
                         headlineContent = { Text(stringResource(R.string.settings_backup_favs)) },
-                        supportingContent = { Text("Export your collection using the built-in file manager") },
+                        supportingContent = { Text(stringResource(R.string.settings_backup_favs_desc)) },
                         leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                     )
                     ListItem(
                         selected = false,
-                        onClick = { 
+                        onClick = {
                             viewModel.openFilePicker(isExport = false)
                         },
-                        headlineContent = { Text("Restore Favourites") },
-                        supportingContent = { Text("Browse local storage using the built-in file manager") },
+                        headlineContent = { Text(stringResource(R.string.settings_restore_favs)) },
+                        supportingContent = { Text(stringResource(R.string.settings_restore_favs_desc)) },
                         leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                     )
 
                     ListItem(
                         selected = false,
                         onClick = onPermissionRequest,
-                        headlineContent = { Text("Grant Storage Permissions") },
-                        supportingContent = { Text("Try this if you cannot see files. Opens system permissions menu.") },
+                        headlineContent = { Text(stringResource(R.string.settings_grant_storage)) },
+                        supportingContent = { Text(stringResource(R.string.settings_grant_storage_desc)) },
                         leadingContent = { Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 }
@@ -2278,12 +2334,12 @@ fun SettingsScreen(
                     ListItem(
                         selected = false,
                         onClick = { viewModel.updateDatabase() },
-                        headlineContent = { Text("Force Database Refresh") },
+                        headlineContent = { Text(stringResource(R.string.settings_force_refresh)) },
                         supportingContent = {
                             val dateStr = if (lastUpdate > 0) {
                                 SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastUpdate))
-                            } else "Never"
-                            Text("Last synced: $dateStr • ${serverStats?.stations ?: "..."} Stations available")
+                            } else stringResource(R.string.last_synced_never)
+                            Text(stringResource(R.string.last_synced_format, dateStr, serverStats?.stations?.toString() ?: "..."))
                         },
                         leadingContent = { Icon(Icons.Default.Radio, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
@@ -2292,12 +2348,12 @@ fun SettingsScreen(
                 }
 
                 item {
-                    Text("INTERFACE & CONTENT", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.interface_content_header), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
                     ListItem(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
-                        headlineContent = { Text("Home Screen Curation") },
-                        supportingContent = { Text("Choose which genres appear on your primary dashboard") },
+                        headlineContent = { Text(stringResource(R.string.settings_home_curation)) },
+                        supportingContent = { Text(stringResource(R.string.settings_home_curation_desc)) },
                         leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
@@ -2759,11 +2815,11 @@ fun StationGrid(
                                 )
                             ) {
                                 if (isLoading) {
-                                    Text("Loading...", style = MaterialTheme.typography.labelLarge)
+                                    Text(stringResource(R.string.loading_ellipsis), style = MaterialTheme.typography.labelLarge)
                                 } else {
                                     Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Load More Stations", style = MaterialTheme.typography.labelLarge)
+                                    Text(stringResource(R.string.load_more_stations), style = MaterialTheme.typography.labelLarge)
                                 }
                             }
                         }
@@ -2840,7 +2896,7 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
                                 colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
                             ) {
                                 Text(
-                                    text = "${tag.stationcount} stations",
+                                    text = stringResource(R.string.count_stations_plain, tag.stationcount),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.White,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -2925,7 +2981,7 @@ fun CountryGrid(
                                 colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
                             ) {
                                 Text(
-                                    text = "${country.stationcount} stations",
+                                    text = stringResource(R.string.count_stations_plain, country.stationcount),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.White,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -3261,13 +3317,13 @@ fun FilePicker(
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = if (state.isExport) "Backup Favourites" else "Restore Favourites",
+                        text = if (state.isExport) stringResource(R.string.file_picker_backup_title) else stringResource(R.string.settings_restore_favs),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
                     Button(onClick = onDismiss) {
-                        Text("Close")
+                        Text(stringResource(R.string.action_close))
                     }
                 }
                 
@@ -3304,7 +3360,7 @@ fun FilePicker(
                                 selected = false,
                                 onClick = onNavigateUp,
                                 headlineContent = { Text("..", fontWeight = FontWeight.Bold) },
-                                supportingContent = { Text("Go to Parent Directory") },
+                                supportingContent = { Text(stringResource(R.string.go_to_parent_directory)) },
                                 leadingContent = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = folderIconColor) }
                             )
                         }
@@ -3342,7 +3398,7 @@ fun FilePicker(
                             },
                             supportingContent = {
                                 if (file.isDirectory) {
-                                    Text("Folder", style = MaterialTheme.typography.labelSmall)
+                                    Text(stringResource(R.string.file_type_folder), style = MaterialTheme.typography.labelSmall)
                                 } else {
                                     val size = file.length()
                                     val sizeStr = if (size > 1024 * 1024) "${size / (1024 * 1024)} MB" else "${size / 1024} KB"
@@ -3367,7 +3423,7 @@ fun FilePicker(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Export filename:",
+                                    text = stringResource(R.string.export_filename_label),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -3384,7 +3440,7 @@ fun FilePicker(
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 )
                             ) {
-                                Text("SAVE HERE")
+                                Text(stringResource(R.string.action_save_here))
                             }
                         }
                     }
@@ -3551,7 +3607,7 @@ fun NowPlayingBar(
                 Card(onClick = onPrevious, modifier = Modifier.padding(horizontal = 4.dp)) {
                     Icon(
                         Icons.Default.SkipPrevious,
-                        contentDescription = "Previous",
+                        contentDescription = stringResource(R.string.content_desc_previous),
                         modifier = Modifier.padding(10.dp).size(24.dp)
                     )
                 }
@@ -3572,7 +3628,7 @@ fun NowPlayingBar(
                 Card(onClick = onNext, modifier = Modifier.padding(horizontal = 4.dp)) {
                     Icon(
                         Icons.Default.SkipNext,
-                        contentDescription = "Next",
+                        contentDescription = stringResource(R.string.content_desc_next),
                         modifier = Modifier.padding(10.dp).size(24.dp)
                     )
                 }
@@ -3585,7 +3641,7 @@ fun NowPlayingBar(
                 ) {
                     Icon(
                         if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite",
+                        contentDescription = stringResource(R.string.content_desc_favorite),
                         modifier = Modifier.padding(10.dp).size(24.dp),
                         tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )

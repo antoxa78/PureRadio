@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.11] - 2026-09-09
+
+### Changed
+- Code cleanup and UI improvements across MainActivity, ViewModel, and repository.
+- Updated translations (Russian/Ukrainian) and string resources.
+- Added foreground service and network security configuration.
+
 ## [1.3.10] - 2026-08-14
 
 ### Fixed
