@@ -280,7 +280,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         applyLanguage(_appLanguage.value)
-        initializePlayer()
         loadTags()
         loadStats()
         selectNavigationItem(_defaultCategory.value, force = true)
@@ -398,6 +397,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playbackServiceConnection,
             Context.BIND_AUTO_CREATE
         )
+    }
+
+    /**
+     * Must run after [playerListener] and [playbackServiceConnection] are initialized,
+     * otherwise the connection reference is still null when [initializePlayer] binds.
+     */
+    init {
+        initializePlayer()
     }
 
     /** Rebuilds the ExoPlayer inside the service with new buffering/passthrough settings. */
@@ -840,7 +847,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadStats() {
         viewModelScope.launch {
-            _serverStats.value = repository.getStats()
+            try {
+                _serverStats.value = repository.getStats()
+            } catch (_: Exception) {
+                // Optional server stats; a transient network failure must not crash the app.
+            }
         }
     }
 
