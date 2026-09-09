@@ -392,8 +392,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @OptIn(UnstableApi::class)
     private fun initializePlayer() {
         val context = getApplication<Application>()
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            action = PlaybackService.ACTION_LOCAL_BIND
+        }
         context.bindService(
-            Intent(context, PlaybackService::class.java),
+            intent,
             playbackServiceConnection,
             Context.BIND_AUTO_CREATE
         )
