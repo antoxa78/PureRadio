@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed (UI)
+- **Empty & loading states**: Favourites, Recent, searches with no results and over-filtered lists now show a clear message with a hint instead of a blank screen; empty lists that are still loading show a spinner.
+- **Non-blocking messages**: Errors and confirmations appear as a small card at the bottom (above the player bar) instead of dimming and hiding the whole screen, so you keep your place in the grid.
+- **Page header**: The station count is shown next to the category name in a muted style (also on Favourites and Recent) instead of being duplicated.
+- **Station tiles**: Codec/bitrate chip (e.g. `MP3 · 128k`, lossless highlighted); the playing station keeps an outline and a larger "now playing" badge.
+- **Player bar**: Pulsing LIVE tag for live streams, accent line along the top, timer switches to h:mm:ss after an hour, favourite heart uses the same red as tile badges.
+- **Settings**: Grouped into General / Playback / Station Database / Data Management sections; a single check mark marks the selected option in every picker; themes show a colour preview; removed the duplicated "Settings" heading.
+- **Readability**: Accent text and icons fall back to a lighter tone in the Modern Blue / Blue Neon themes, where the deep blue was hard to read on dark backgrounds; the selected drawer entry is no longer dark-blue-on-dark-blue.
+- **Navigation icons**: Popular, Genres and Countries use more fitting icons.
+- **Search**: Localized NAME/TAG mode button with icons, history icons on recent searches and a "Clear" button.
+
+### Fixed
+- Remaining hard-coded English text in the player bar, screensaver status line, search mode button and database update interval picker is now translated (RU/UK).
+
+## [1.3.12] - 2026-10-03
+
+### Added
+- **Unified Backup & Restore**: "Backup Data" / "Restore Data" now exports both your favourite stations and your home-screen categories (genres/countries) into a single playlist file using the built-in file manager.
+  - Restoring offers merge or replace; old favourites-only backup files remain fully compatible.
+  - Backup files are standard M3U, so other players can still read your station list.
+
+### Changed
+- Backup files are now named `pureradio backup <date>.m3u`.
+
 ## [1.3.11] - 2026-09-09
 
 ### Changed

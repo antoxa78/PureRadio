@@ -24,11 +24,13 @@
     <string name="settings_smart_filter">Смарт-фільтр</string>
     <string name="settings_min_tag_count">Мін. к-сть станцій у тегу</string>
     <string name="settings_bg_sync">Фонова синхронізація</string>
-    <string name="settings_backup_favs">Резервне копіювання обраного</string>
+    <string name="settings_backup_favs">Резервне копіювання даних</string>
     <string name="error_connection_lost">З\'єднання втрачено. Повтор через %1$ds... (%2$d/3)</string>
     <string name="error_retrying_now">Повторне підключення...</string>
     <string name="dialog_add_home">Додати на головну?</string>
     <string name="dialog_remove_home">Видалити з головної?</string>
+    <string name="genre_on_home">На головному екрані</string>
+    <string name="station_in_favorites">В обраному</string>
     <string name="dialog_overwrite_backup">Перезаписати файл бекапу?</string>
     <string name="sort_label">Сортування: </string>
     <string name="sort_name">Ім\'я</string>
@@ -81,10 +83,11 @@
     <string name="favorite_remove_title">Видалити з колекції?</string>
 
     <string name="restore_dialog_found_stations">Знайдено станцій: %1$d. Виберіть дію:</string>
-    <string name="restore_action_add">Додати до поточного обраного</string>
-    <string name="restore_action_replace">Замінити все обране</string>
+    <string name="restore_dialog_found_items">Знайдено станцій: %1$d, категорій: %2$d. Оберіть дію:</string>
+    <string name="restore_action_add">Додати до поточних даних</string>
+    <string name="restore_action_replace">Замінити всі дані</string>
     <string name="restore_confirm_title">Ви впевнені?</string>
-    <string name="restore_confirm_message">Це видалить усі ваші поточні обрані станції та замінить їх станціями з файлу.</string>
+    <string name="restore_confirm_message">Це видалить усі ваші обрані станції та категорії головного екрана та замінить їх даними з файлу.</string>
 
     <string name="bitrate_filter_label">Фільтр за бітрейтом: </string>
     <string name="bitrate_low">Низький (&lt;192)</string>
@@ -129,9 +132,9 @@
     <string name="current_status_format">Поточний статус: %1$s</string>
 
     <string name="data_management_header">УПРАВЛІННЯ ДАНИМИ</string>
-    <string name="settings_backup_favs_desc">Експортувати колекцію за допомогою вбудованого файлового менеджера</string>
-    <string name="settings_restore_favs">Відновити обране</string>
-    <string name="settings_restore_favs_desc">Перегляд локального сховища за допомогою вбудованого файлового менеджера</string>
+    <string name="settings_backup_favs_desc">Створити резервну копію обраного та категорій головного екрана через вбудований файловий менеджер</string>
+    <string name="settings_restore_favs">Відновити дані</string>
+    <string name="settings_restore_favs_desc">Відновити обране та категорії головного екрана з файлу резервної копії</string>
     <string name="settings_grant_storage">Надати доступ до сховища</string>
     <string name="settings_grant_storage_desc">Спробуйте це, якщо не бачите файли. Відкриє системне меню дозволів.</string>
     <string name="settings_force_refresh">Примусове оновлення бази даних</string>
@@ -147,11 +150,32 @@
 
     <string name="pip_unavailable_notice">Режим "картинка в картинці" тут недоступний, але відтворення продовжиться у фоновому режимі — керуйте ним через сповіщення.</string>
 
-    <string name="file_picker_backup_title">Резервне копіювання обраного</string>
+    <string name="file_picker_backup_title">Резервне копіювання даних</string>
     <string name="go_to_parent_directory">Перейти до батьківської папки</string>
     <string name="file_type_folder">Папка</string>
     <string name="export_filename_label">Ім\'я файлу експорту:</string>
     <string name="playback_channel_name">Відтворення</string>
     <string name="playback_notification_placeholder">Pure Radio</string>
     <string name="playback_notification_connecting">Підключення до станції…</string>
+
+    <!-- UI refresh: empty states, settings sections, player bar -->
+    <string name="settings_section_general">ЗАГАЛЬНІ</string>
+    <string name="settings_section_playback">ВІДТВОРЕННЯ</string>
+    <string name="settings_section_database">БАЗА СТАНЦІЙ</string>
+    <string name="empty_favorites_title">Обраного поки немає</string>
+    <string name="empty_favorites_message">Утримуйте кнопку на будь-якій станції або натисніть сердечко в плеєрі, щоб додати її сюди.</string>
+    <string name="empty_recent_title">Ще нічого не грало</string>
+    <string name="empty_recent_message">Тут з\'являться станції, які ви слухали, для швидкого доступу.</string>
+    <string name="empty_no_stations_title">Станції не знайдено</string>
+    <string name="empty_no_stations_message">Спробуйте інший запит або вимкніть частину фільтрів за бітрейтом.</string>
+    <string name="search_empty_message">Введіть назву станції або перемкніть режим, щоб шукати за жанром.</string>
+    <string name="search_clear_recent">Очистити</string>
+    <string name="search_mode_name">НАЗВА</string>
+    <string name="search_mode_tag">ЖАНР</string>
+    <string name="playback_status_playing">Грає • %1$s</string>
+    <string name="playback_status_paused">Пауза • %1$s</string>
+    <string name="now_playing_live">ЕФІР</string>
+    <string name="content_desc_play">Відтворити</string>
+    <string name="content_desc_pause">Пауза</string>
+    <string name="content_desc_clear">Очистити</string>
 </resources>

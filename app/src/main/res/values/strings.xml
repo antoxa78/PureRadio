@@ -24,11 +24,13 @@
     <string name="settings_smart_filter">Smart Filter</string>
     <string name="settings_min_tag_count">Min Tag Station Count</string>
     <string name="settings_bg_sync">Background Synchronization</string>
-    <string name="settings_backup_favs">Backup Favourites</string>
+    <string name="settings_backup_favs">Backup Data</string>
     <string name="error_connection_lost">Connection lost. Retrying in %1$ds... (%2$d/3)</string>
     <string name="error_retrying_now">Retrying now...</string>
     <string name="dialog_add_home">Add to Home Tab?</string>
     <string name="dialog_remove_home">Remove from Home Tab?</string>
+    <string name="genre_on_home">On Home screen</string>
+    <string name="station_in_favorites">In Favourites</string>
     <string name="dialog_overwrite_backup">Overwrite Backup File?</string>
     <string name="sort_label">Sort: </string>
     <string name="sort_name">Name</string>
@@ -87,10 +89,11 @@
 
     <!-- Restore favourites dialogs -->
     <string name="restore_dialog_found_stations">Found %1$d stations. Choose action:</string>
-    <string name="restore_action_add">Add to current favorites</string>
-    <string name="restore_action_replace">Replace all favorites</string>
+    <string name="restore_dialog_found_items">Found %1$d stations and %2$d home screen categories. Choose action:</string>
+    <string name="restore_action_add">Add to current data</string>
+    <string name="restore_action_replace">Replace all data</string>
     <string name="restore_confirm_title">Are you sure?</string>
-    <string name="restore_confirm_message">This will delete all your current favorites and replace them with the ones from the file.</string>
+    <string name="restore_confirm_message">This will delete all your current favourites and home-screen categories and replace them with the ones from the file.</string>
 
     <!-- Bitrate filter -->
     <string name="bitrate_filter_label">Filter Stations By Bitrate: </string>
@@ -142,9 +145,9 @@
 
     <!-- Settings: data management -->
     <string name="data_management_header">DATA MANAGEMENT</string>
-    <string name="settings_backup_favs_desc">Export your collection using the built-in file manager</string>
-    <string name="settings_restore_favs">Restore Favourites</string>
-    <string name="settings_restore_favs_desc">Browse local storage using the built-in file manager</string>
+    <string name="settings_backup_favs_desc">Back up favourites and home-screen categories using the built-in file manager</string>
+    <string name="settings_restore_favs">Restore Data</string>
+    <string name="settings_restore_favs_desc">Restore favourites and home-screen categories from a backup file</string>
     <string name="settings_grant_storage">Grant Storage Permissions</string>
     <string name="settings_grant_storage_desc">Try this if you cannot see files. Opens system permissions menu.</string>
     <string name="settings_force_refresh">Force Database Refresh</string>
@@ -164,11 +167,32 @@
     <string name="pip_unavailable_notice">Picture-in-Picture isn\'t available here, but playback will keep going in the background — check the notification to control it.</string>
 
     <!-- File picker -->
-    <string name="file_picker_backup_title">Backup Favourites</string>
+    <string name="file_picker_backup_title">Backup Data</string>
     <string name="go_to_parent_directory">Go to Parent Directory</string>
     <string name="file_type_folder">Folder</string>
     <string name="export_filename_label">Export filename:</string>
     <string name="playback_channel_name">Playback</string>
     <string name="playback_notification_placeholder">Pure Radio</string>
     <string name="playback_notification_connecting">Connecting to station…</string>
+
+    <!-- UI refresh: empty states, settings sections, player bar -->
+    <string name="settings_section_general">GENERAL</string>
+    <string name="settings_section_playback">PLAYBACK</string>
+    <string name="settings_section_database">STATION DATABASE</string>
+    <string name="empty_favorites_title">No favourites yet</string>
+    <string name="empty_favorites_message">Long-press any station, or use the heart in the player bar, to add it here.</string>
+    <string name="empty_recent_title">Nothing played yet</string>
+    <string name="empty_recent_message">Stations you listen to will show up here for quick access.</string>
+    <string name="empty_no_stations_title">No stations found</string>
+    <string name="empty_no_stations_message">Try another search, or turn off some of the bitrate filters.</string>
+    <string name="search_empty_message">Type a station name, or switch the mode button to search by genre tag.</string>
+    <string name="search_clear_recent">Clear</string>
+    <string name="search_mode_name">NAME</string>
+    <string name="search_mode_tag">TAG</string>
+    <string name="playback_status_playing">Playing • %1$s</string>
+    <string name="playback_status_paused">Paused • %1$s</string>
+    <string name="now_playing_live">LIVE</string>
+    <string name="content_desc_play">Play</string>
+    <string name="content_desc_pause">Pause</string>
+    <string name="content_desc_clear">Clear</string>
 </resources>

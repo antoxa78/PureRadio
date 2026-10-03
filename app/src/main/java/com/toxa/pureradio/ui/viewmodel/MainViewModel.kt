@@ -38,6 +38,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 enum class NavigationItem {
     Home, Popular, Recent, Search, Genres, Countries, Favourites, Settings, Exit
@@ -53,6 +57,18 @@ data class GenreGroup(
     val totalStations: Int = 0,
     val filteredCount: Int = 0,
     val isCountry: Boolean = false
+)
+
+/** Home-screen categories (genre/country sections shown on the Home tab), if a backup contained any. */
+data class PendingHomeSettings(
+    val genres: Set<String>,
+    val countries: Set<String>
+)
+
+/** Result of parsing a playlist/backup file: favourite stations plus optional home curation. */
+data class ParsedBackup(
+    val stations: List<Station>,
+    val homeSettings: PendingHomeSettings?
 )
 
 enum class ScreensaverMode {
@@ -142,6 +158,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedCountry = MutableStateFlow<Country?>(null)
     val selectedCountry: StateFlow<Country?> = _selectedCountry
 
+    private val _lastBrowsedCategory = MutableStateFlow<String?>(null)
+    val lastBrowsedCategory: StateFlow<String?> = _lastBrowsedCategory
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 
@@ -224,6 +243,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingImportStations = MutableStateFlow<List<Station>?>(null)
     val pendingImportStations: StateFlow<List<Station>?> = _pendingImportStations
 
+    private val _pendingHomeSettings = MutableStateFlow<PendingHomeSettings?>(null)
+    val pendingHomeSettings: StateFlow<PendingHomeSettings?> = _pendingHomeSettings
+
     private val _pendingOverwriteFile = MutableStateFlow<File?>(null)
     val pendingOverwriteFile: StateFlow<File?> = _pendingOverwriteFile
 
@@ -270,6 +292,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob: kotlinx.coroutines.Job? = null
     private var contentRequestId = 0L
 
+    // Maximum API pages fetched per Home category when a bitrate filter is active.
+    private val maxHomeGroupPages = 2
+
+    // How many per-category Home requests are allowed in-flight at once, to avoid
+    // tripping radio-browser rate limiting when many categories are selected.
+    private val maxHomeRequestsInFlight = 6
+
     private fun beginContentRequest(): Long {
         contentRequestId++
         return contentRequestId
@@ -281,6 +310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         applyLanguage(_appLanguage.value)
         loadTags()
+        loadCountries()
         loadStats()
         selectNavigationItem(_defaultCategory.value, force = true)
         startPlaybackTimer()
@@ -510,7 +540,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getTimestampedBackupFileName(): String {
         val now = java.util.Date()
         val format = java.text.SimpleDateFormat("dd_MMM_yyyy_HH.mm", java.util.Locale.US)
-        return "favourites ${format.format(now).lowercase()}.m3u"
+        return "pureradio backup ${format.format(now).lowercase()}.m3u"
     }
 
     fun closeFilePicker() {
@@ -572,12 +602,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val importedStations = withContext(Dispatchers.IO) {
+                val parsed = withContext(Dispatchers.IO) {
                     parsePlaylistLines(file.readLines())
                 }
                 
-                if (importedStations.isNotEmpty()) {
-                    _pendingImportStations.value = importedStations
+                if (parsed.stations.isNotEmpty() || parsed.homeSettings != null) {
+                    _pendingImportStations.value = parsed.stations
+                    _pendingHomeSettings.value = parsed.homeSettings
                     // Don't close file picker yet if we need dialog, or close it and show dialog?
                     // Better to close file picker and show the restore dialog on top of settings.
                     closeFilePicker()
@@ -595,18 +626,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun confirmRestore(replace: Boolean) {
-        val stations = _pendingImportStations.value ?: return
+        val stations = _pendingImportStations.value ?: emptyList()
+        val homeSettings = _pendingHomeSettings.value
+        if (stations.isEmpty() && homeSettings == null) {
+            _pendingImportStations.value = null
+            _pendingHomeSettings.value = null
+            return
+        }
         if (replace) {
             _favorites.value = emptySet()
             _favoriteStations.value = emptyList()
         }
         mergeImportedStations(stations)
+        applyHomeSettings(homeSettings, replace = replace)
         _pendingImportStations.value = null
+        _pendingHomeSettings.value = null
         refreshFavoriteStations()
     }
 
     fun cancelRestore() {
         _pendingImportStations.value = null
+        _pendingHomeSettings.value = null
     }
 
     fun confirmOverwrite() {
@@ -649,6 +689,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun generateM3uContent(): String {
         val stations = _favoriteStations.value
         val content = StringBuilder("#EXTM3U\n")
+
+        val genres = _visibleGenres.value
+        val countries = _visibleCountries.value
+        if (genres.isNotEmpty() || countries.isNotEmpty()) {
+            // Custom tag for home-screen curation (the genre/country sections on the Home
+            // tab). Each name is percent-encoded separately and the encoded values joined
+            // with ',', so a name containing ',' or ';' (e.g. "Korea, Republic Of") can't
+            // desync the list on re-import.
+            content.append(
+                "#EXT-X-PURE-RADIO-HOME:" +
+                    "genres=${genres.joinToString(",") { element -> encodePlaylistField(element) }};" +
+                    "countries=${countries.joinToString(",") { element -> encodePlaylistField(element) }}\n"
+            )
+        }
+
         stations.forEach { station ->
             // Commas delimit the title in the standard EXTINF format, so a comma in the
             // station name would otherwise get read back by other players (and our own
@@ -675,13 +730,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return content.toString()
     }
 
-    private fun parsePlaylistLines(lines: List<String>): List<Station> {
-        if (lines.isEmpty()) return emptyList()
+    private fun parsePlaylistLines(lines: List<String>): ParsedBackup {
+        if (lines.isEmpty()) return ParsedBackup(emptyList(), null)
         
-        val firstLine = lines.firstOrNull { it.isNotBlank() }?.trim()?.removePrefix("\uFEFF") ?: return emptyList()
+        val firstLine = lines.firstOrNull { it.isNotBlank() }?.trim()?.removePrefix("\uFEFF") ?: return ParsedBackup(emptyList(), null)
         
         return when {
             firstLine.startsWith("#EXTM3U", ignoreCase = true) -> parseM3uLines(lines)
+            // A combined backup may contain only home curation (no stations). Route it to the
+            // M3U parser directly so its HOME tag isn't mistaken for a bare PLS key=value file.
+            firstLine.startsWith("#EXT-X-PURE-RADIO-HOME:", ignoreCase = true) -> parseM3uLines(lines)
             firstLine.startsWith("[playlist]", ignoreCase = true) -> parsePlsLines(lines)
             firstLine.contains("=", ignoreCase = false) && firstLine.any { it.isDigit() } -> {
                 // Might be a PLS file without header (e.g. File1=url or URL1=url)
@@ -694,7 +752,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun parsePlsLines(lines: List<String>): List<Station> {
+    private fun parsePlsLines(lines: List<String>): ParsedBackup {
         val importedStations = mutableListOf<Station>()
         val entries = mutableMapOf<Int, MutableMap<String, String>>()
         
@@ -736,10 +794,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ))
         }
         
-        return importedStations
+        return ParsedBackup(importedStations, null)
     }
 
-    private fun parseM3uLines(lines: List<String>): List<Station> {
+    private fun parseM3uLines(lines: List<String>): ParsedBackup {
         val importedStations = mutableListOf<Station>()
         var currentName = ""
         var currentUuid = ""
@@ -751,10 +809,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         var currentVotes = 0
         var currentCodec = ""
         var currentBitrate = 0
+        var homeGenresRaw = ""
+        var homeCountriesRaw = ""
         
         for (line in lines) {
             val trimmedLine = line.trim()
             when {
+                trimmedLine.startsWith("#EXT-X-PURE-RADIO-HOME:") -> {
+                    // Home-screen curation carried by backups made with this version.
+                    // Like the per-station data line, values are percent-encoded on export
+                    // so a name containing ';' or '=' can't be mistaken for a separator.
+                    val data = trimmedLine.removePrefix("#EXT-X-PURE-RADIO-HOME:").split(";")
+                    val map = data.associate {
+                        val parts = it.split("=", limit = 2)
+                        // Keep values URL-encoded here and decode AFTER splitting on ',', so
+                        // a literal comma inside a name (encoded as %2C) isn't taken for the
+                        // list separator.
+                        if (parts.size == 2) parts[0] to parts[1] else "" to ""
+                    }
+                    homeGenresRaw = map["genres"] ?: ""
+                    homeCountriesRaw = map["countries"] ?: ""
+                }
                 trimmedLine.startsWith("#EXT-X-PURE-RADIO-DATA:") -> {
                     // Fields are percent-encoded on export (see generateM3uContent) so a
                     // ';' or '=' inside a value can't be mistaken for a field separator.
@@ -811,7 +886,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        return importedStations
+        val homeGenres = homeGenresRaw.split(",").map { decodePlaylistField(it).trim() }.filter { it.isNotEmpty() }.toSet()
+        val homeCountries = homeCountriesRaw.split(",").map { decodePlaylistField(it).trim() }.filter { it.isNotEmpty() }.toSet()
+        val homeSettings = if (homeGenres.isNotEmpty() || homeCountries.isNotEmpty()) {
+            PendingHomeSettings(homeGenres, homeCountries)
+        } else null
+        return ParsedBackup(importedStations, homeSettings)
     }
 
     private fun mergeImportedStations(importedStations: List<Station>) {
@@ -830,6 +910,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveFavoritesToPrefs(currentFavorites, currentStationList)
         if (_selectedNavItem.value == NavigationItem.Favourites) {
             _stations.value = currentStationList
+        }
+    }
+
+    /**
+     * Restores the Home-tab curation (visible genre/country sections) carried by a backup.
+     * A [null] [settings] means the file held no home categories, in which case the current
+     * curation is left untouched. With [replace] the imported sets overwrite the current
+     * ones; otherwise they are merged (union).
+     */
+    private fun applyHomeSettings(settings: PendingHomeSettings?, replace: Boolean) {
+        if (settings == null) return
+        val newGenres = if (replace) settings.genres else _visibleGenres.value + settings.genres
+        val newCountries = if (replace) settings.countries else _visibleCountries.value + settings.countries
+        _visibleGenres.value = newGenres
+        _visibleCountries.value = newCountries
+        saveVisibleGenres(newGenres)
+        saveVisibleCountries(newCountries)
+        if (_selectedNavItem.value == NavigationItem.Home) {
+            loadTopStations()
         }
     }
 
@@ -1234,7 +1333,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         _genreGroups.value = _genreGroups.value.map { group ->
-            group.copy(filteredCount = group.stations.count { matchesBitrateFilter(it, bitrates) })
+            // Groups built from the cached tag/country counts carry no station list, so
+            // their count must be kept as-is rather than recomputed over an empty list.
+            group.copy(
+                filteredCount = if (group.stations.isEmpty()) group.filteredCount
+                                else group.stations.count { matchesBitrateFilter(it, bitrates) }
+            )
         }
 
         _tagSearchGroups.value = _tagSearchGroups.value.map { group ->
@@ -1395,49 +1499,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } else {
                     val bitrates = _selectedBitrates.value
-                    val groups = mutableListOf<GenreGroup>()
-                    
-                    val genreDeferred = selectedGenres.map { genre ->
-                        async(Dispatchers.IO) {
-                            var offset = 0
-                            var allStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
-                            var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
-                            var retries = 0
-                            while (retries < 5 && allStations.size >= 100 && filteredCount < 100) {
-                                offset += 100
-                                val moreStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
-                                if (moreStations.isEmpty()) break
-                                allStations = (allStations + moreStations).distinctBy { it.stationUuid }
-                                filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
-                                retries++
+
+                    // Fast path: with no bitrate filter the Home tiles only need the cached
+                    // tag/country counts (loaded at startup), so the screen can render
+                    // instantly without one API request per selected category. Opening a
+                    // tile fetches its station list on demand.
+                    if (bitrates.isEmpty() && _tags.value.isNotEmpty() && _countries.value.isNotEmpty()) {
+                        val groups = buildList {
+                            selectedGenres.forEach { genre ->
+                                val tag = _tags.value.find { it.name.equals(genre, ignoreCase = true) }
+                                val total = tag?.stationcount ?: 0
+                                add(GenreGroup(genre, emptyList(), total, total, isCountry = false))
                             }
-                            val total = _tags.value.find { it.name == genre }?.stationcount ?: allStations.size
-                            GenreGroup(genre, allStations, total, filteredCount, isCountry = false)
+                            selectedCountries.forEach { country ->
+                                val c = _countries.value.find { it.name.equals(country, ignoreCase = true) }
+                                val total = c?.stationcount ?: 0
+                                add(GenreGroup(country, emptyList(), total, total, isCountry = true))
+                            }
+                        }
+                        if (isCurrentContentRequest(requestId)) {
+                            _genreGroups.value = groups
+                        }
+                        return@launch
+                    }
+
+                    // Network path (bitrate filters active, or tag/country caches not ready).
+                    // Throttle concurrent requests and publish each group as it finishes so
+                    // the Home screen fills in progressively instead of waiting for every
+                    // category to complete.
+                    val throttle = Semaphore(maxHomeRequestsInFlight)
+                    val mutex = Mutex()
+                    val deferred = selectedGenres.map { genre ->
+                        async(Dispatchers.IO) {
+                            throttle.withPermit {
+                                fetchHomeGenreGroup(genre, bitrates, hideBroken)
+                            }
+                        }
+                    } + selectedCountries.map { country ->
+                        async(Dispatchers.IO) {
+                            throttle.withPermit {
+                                fetchHomeCountryGroup(country, bitrates, hideBroken)
+                            }
                         }
                     }
-                    
-                    val countryDeferred = selectedCountries.map { country ->
-                        async(Dispatchers.IO) {
-                            var offset = 0
-                            var allStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
-                            var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
-                            var retries = 0
-                            while (retries < 5 && allStations.size >= 100 && filteredCount < 100) {
-                                offset += 100
-                                val moreStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
-                                if (moreStations.isEmpty()) break
-                                allStations = (allStations + moreStations).distinctBy { it.stationUuid }
-                                filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
-                                retries++
-                            }
-                            val total = _countries.value.find { it.name == country }?.stationcount ?: allStations.size
-                            GenreGroup(country, allStations, total, filteredCount, isCountry = true)
+
+                    deferred.forEach { d ->
+                        val group = d.await()
+                        if (!isCurrentContentRequest(requestId)) return@launch
+                        mutex.withLock {
+                            _genreGroups.value = _genreGroups.value + group
                         }
                     }
-                    
-                    groups.addAll((genreDeferred + countryDeferred).awaitAll())
-                    if (!isCurrentContentRequest(requestId)) return@launch
-                    _genreGroups.value = groups
                 }
             } catch (e: Exception) {
                 if (isCurrentContentRequest(requestId)) {
@@ -1452,6 +1564,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /**
+     * Fetches stations for one Home genre category. Paginates only enough to reach a
+     * meaningful filtered count (capped by [maxHomeGroupPages]) instead of scanning the
+     * whole category, which is many API calls for large genres.
+     */
+    private suspend fun fetchHomeGenreGroup(
+        genre: String,
+        bitrates: Set<BitrateFilter>,
+        hideBroken: Boolean
+    ): GenreGroup {
+        var offset = 0
+        var allStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+        var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+        var pages = 1
+        while (pages < maxHomeGroupPages && allStations.size >= 100 && filteredCount < 100) {
+            offset += 100
+            val moreStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+            if (moreStations.isEmpty()) break
+            allStations = (allStations + moreStations).distinctBy { it.stationUuid }
+            filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+            pages++
+        }
+        val total = _tags.value.find { it.name.equals(genre, ignoreCase = true) }?.stationcount ?: allStations.size
+        return GenreGroup(genre, allStations, total, filteredCount, isCountry = false)
+    }
+
+    private suspend fun fetchHomeCountryGroup(
+        country: String,
+        bitrates: Set<BitrateFilter>,
+        hideBroken: Boolean
+    ): GenreGroup {
+        var offset = 0
+        var allStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+        var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+        var pages = 1
+        while (pages < maxHomeGroupPages && allStations.size >= 100 && filteredCount < 100) {
+            offset += 100
+            val moreStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+            if (moreStations.isEmpty()) break
+            allStations = (allStations + moreStations).distinctBy { it.stationUuid }
+            filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
+            pages++
+        }
+        val total = _countries.value.find { it.name.equals(country, ignoreCase = true) }?.stationcount ?: allStations.size
+        return GenreGroup(country, allStations, total, filteredCount, isCountry = true)
     }
 
     private fun loadTags() {
@@ -1555,16 +1714,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshFavoriteStations()
     }
 
+    /**
+     * Whether a station is considered part of the favourites collection.
+     *
+     * Favourites are matched by:
+     * 1. exact Radio Browser UUID (the normal case), or
+     * 2. normalized stream URL, or
+     * 3. case-insensitive name match.
+     *
+     * The URL/name fallbacks cover stations imported from external playlists: those carry
+     * locally-generated UUIDs (and possibly older URLs), so they never equal the real
+     * Radio Browser record returned by search - without the fallbacks their favourite
+     * state would be invisible.
+     */
+    fun isFavorite(station: Station): Boolean {
+        if (_favorites.value.contains(station.stationUuid)) return true
+        val favouriteStations = _favoriteStations.value
+        if (favouriteStations.isEmpty()) return false
+
+        val stationUrl = normalizeStreamUrl(station.url)
+        val stationName = station.name.trim().lowercase()
+        if (stationUrl.isEmpty() && stationName.isEmpty()) return false
+
+        return favouriteStations.any { fav ->
+            if (fav.stationUuid == station.stationUuid) return@any true
+            val favUrl = normalizeStreamUrl(fav.url)
+            if (favUrl.isNotEmpty() && favUrl == stationUrl) return@any true
+            val favName = fav.name.trim().lowercase()
+            favName.isNotEmpty() && stationName.isNotEmpty() &&
+                (stationName.contains(favName) || favName.contains(stationName))
+        }
+    }
+
+    private fun normalizeStreamUrl(url: String): String = url.trim().trimEnd('/').lowercase()
+
     fun toggleFavorite(station: Station) {
         val currentFavorites = _favorites.value.toMutableSet()
         val currentStationList = _favoriteStations.value.toMutableList()
 
-        if (currentFavorites.contains(station.stationUuid)) {
-            currentFavorites.remove(station.stationUuid)
-            currentStationList.removeAll { it.stationUuid == station.stationUuid }
+        if (isFavorite(station)) {
+            // Prefer removing by exact UUID; for playlist-imported duplicates (different
+            // UUID / URL / name), remove the matching stored favourite instead.
+            if (currentFavorites.contains(station.stationUuid)) {
+                currentFavorites.remove(station.stationUuid)
+                currentStationList.removeAll { it.stationUuid == station.stationUuid }
+            } else {
+                val match = currentStationList.firstOrNull { favouriteMatches(station, it) }
+                if (match != null) {
+                    currentFavorites.remove(match.stationUuid)
+                    currentStationList.remove(match)
+                }
+            }
         } else {
             currentFavorites.add(station.stationUuid)
-            if (!currentStationList.any { it.stationUuid == station.stationUuid }) {
+            if (!currentStationList.any { it.stationUuid == station.stationUuid || normalizeStreamUrl(it.url) == normalizeStreamUrl(station.url) }) {
                 currentStationList.add(station)
             }
         }
@@ -1575,6 +1778,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_selectedNavItem.value == NavigationItem.Favourites) {
             _stations.value = currentStationList
         }
+    }
+
+    /** Single-station comparison mirroring the fallback rules in [isFavorite]. */
+    private fun favouriteMatches(candidate: Station, favourite: Station): Boolean {
+        if (candidate.stationUuid == favourite.stationUuid) return true
+        val candidateUrl = normalizeStreamUrl(candidate.url)
+        val favouriteUrl = normalizeStreamUrl(favourite.url)
+        if (candidateUrl.isNotEmpty() && candidateUrl == favouriteUrl) return true
+        val candidateName = candidate.name.trim().lowercase()
+        val favouriteName = favourite.name.trim().lowercase()
+        return candidateName.isNotEmpty() && favouriteName.isNotEmpty() &&
+            (candidateName.contains(favouriteName) || favouriteName.contains(candidateName))
     }
 
     fun exportFavoritesToM3u(uri: Uri) {
@@ -1603,15 +1818,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val context = getApplication() as Context
-                val importedStations = withContext(Dispatchers.IO) {
+                val parsed = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { inputStream ->
                         parsePlaylistLines(inputStream.bufferedReader().readLines())
-                    } ?: emptyList()
+                    } ?: ParsedBackup(emptyList(), null)
                 }
                 
-                if (importedStations.isNotEmpty()) {
-                    mergeImportedStations(importedStations)
-                    _successMessage.value = "Imported ${importedStations.size} stations"
+                if (parsed.stations.isNotEmpty() || parsed.homeSettings != null) {
+                    mergeImportedStations(parsed.stations)
+                    applyHomeSettings(parsed.homeSettings, replace = false)
+                    val parts = buildList {
+                        if (parsed.stations.isNotEmpty()) add("${parsed.stations.size} stations")
+                        parsed.homeSettings?.let { add("${it.genres.size + it.countries.size} home categories") }
+                    }
+                    _successMessage.value = "Imported ${parts.joinToString(" and ")}"
                     refreshFavoriteStations()
                 } else {
                     _error.value = "No stations found in file"
@@ -1627,6 +1847,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectTag(tag: Tag?) {
         val isNewTag = _selectedTag.value != tag
         _selectedTag.value = tag
+        if (tag != null) {
+            _lastBrowsedCategory.value = tag.name
+        }
         if (tag == null) {
             beginContentRequest()
             _isLoading.value = false
@@ -1669,6 +1892,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectCountry(country: Country?) {
         val isNewCountry = _selectedCountry.value != country
         _selectedCountry.value = country
+        if (country != null) {
+            _lastBrowsedCategory.value = country.name
+        }
         if (country == null) {
             beginContentRequest()
             _isLoading.value = false
@@ -1741,6 +1967,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectSearchTag(tagName: String?) {
         _selectedSearchTag.value = tagName
+        if (tagName != null) {
+            _lastBrowsedCategory.value = tagName
+        }
         val requestId = beginContentRequest()
         if (tagName == null) {
             _isLoading.value = false

@@ -24,11 +24,13 @@
     <string name="settings_smart_filter">Смарт-фильтр</string>
     <string name="settings_min_tag_count">Мин. кол-во станций в теге</string>
     <string name="settings_bg_sync">Фоновая синхронизация</string>
-    <string name="settings_backup_favs">Резервное копирование избранного</string>
+    <string name="settings_backup_favs">Резервное копирование данных</string>
     <string name="error_connection_lost">Соединение потеряно. Повтор через %1$ds... (%2$d/3)</string>
     <string name="error_retrying_now">Повторное подключение...</string>
     <string name="dialog_add_home">Добавить на главную?</string>
     <string name="dialog_remove_home">Удалить с главной?</string>
+    <string name="genre_on_home">На главном экране</string>
+    <string name="station_in_favorites">В избранном</string>
     <string name="dialog_overwrite_backup">Перезаписать файл бэкапа?</string>
     <string name="sort_label">Сортировка: </string>
     <string name="sort_name">Имя</string>
@@ -81,10 +83,11 @@
     <string name="favorite_remove_title">Удалить из коллекции?</string>
 
     <string name="restore_dialog_found_stations">Найдено станций: %1$d. Выберите действие:</string>
-    <string name="restore_action_add">Добавить к текущему избранному</string>
-    <string name="restore_action_replace">Заменить всё избранное</string>
+    <string name="restore_dialog_found_items">Найдено станций: %1$d, категорий: %2$d. Выберите действие:</string>
+    <string name="restore_action_add">Добавить к текущим данным</string>
+    <string name="restore_action_replace">Заменить все данные</string>
     <string name="restore_confirm_title">Вы уверены?</string>
-    <string name="restore_confirm_message">Это удалит все ваши текущие избранные станции и заменит их станциями из файла.</string>
+    <string name="restore_confirm_message">Это удалит все ваши текущие избранные станции и категории главного экрана и заменит их данными из файла.</string>
 
     <string name="bitrate_filter_label">Фильтр по битрейту: </string>
     <string name="bitrate_low">Низкий (&lt;192)</string>
@@ -129,9 +132,9 @@
     <string name="current_status_format">Текущий статус: %1$s</string>
 
     <string name="data_management_header">УПРАВЛЕНИЕ ДАННЫМИ</string>
-    <string name="settings_backup_favs_desc">Экспортировать коллекцию через встроенный файловый менеджер</string>
-    <string name="settings_restore_favs">Восстановить избранное</string>
-    <string name="settings_restore_favs_desc">Просмотр локального хранилища через встроенный файловый менеджер</string>
+    <string name="settings_backup_favs_desc">Создать резервную копию избранного и категорий главного экрана через встроенный файловый менеджер</string>
+    <string name="settings_restore_favs">Восстановить данные</string>
+    <string name="settings_restore_favs_desc">Восстановить избранное и категории главного экрана из файла резервной копии</string>
     <string name="settings_grant_storage">Предоставить доступ к хранилищу</string>
     <string name="settings_grant_storage_desc">Попробуйте это, если не видите файлы. Откроет системное меню разрешений.</string>
     <string name="settings_force_refresh">Принудительное обновление базы данных</string>
@@ -147,11 +150,32 @@
 
     <string name="pip_unavailable_notice">Режим "картинка в картинке" здесь недоступен, но воспроизведение продолжится в фоновом режиме — управляйте им через уведомление.</string>
 
-    <string name="file_picker_backup_title">Резервное копирование избранного</string>
+    <string name="file_picker_backup_title">Резервное копирование данных</string>
     <string name="go_to_parent_directory">Перейти в родительскую папку</string>
     <string name="file_type_folder">Папка</string>
     <string name="export_filename_label">Имя файла экспорта:</string>
     <string name="playback_channel_name">Воспроизведение</string>
     <string name="playback_notification_placeholder">Pure Radio</string>
     <string name="playback_notification_connecting">Подключение к станции…</string>
+
+    <!-- UI refresh: empty states, settings sections, player bar -->
+    <string name="settings_section_general">ОБЩИЕ</string>
+    <string name="settings_section_playback">ВОСПРОИЗВЕДЕНИЕ</string>
+    <string name="settings_section_database">БАЗА СТАНЦИЙ</string>
+    <string name="empty_favorites_title">Избранного пока нет</string>
+    <string name="empty_favorites_message">Удерживайте кнопку на любой станции или нажмите сердечко в плеере, чтобы добавить её сюда.</string>
+    <string name="empty_recent_title">Пока ничего не играло</string>
+    <string name="empty_recent_message">Здесь появятся станции, которые вы слушали, для быстрого доступа.</string>
+    <string name="empty_no_stations_title">Станции не найдены</string>
+    <string name="empty_no_stations_message">Попробуйте другой запрос или отключите часть фильтров по битрейту.</string>
+    <string name="search_empty_message">Введите название станции или переключите режим, чтобы искать по жанру.</string>
+    <string name="search_clear_recent">Очистить</string>
+    <string name="search_mode_name">НАЗВАНИЕ</string>
+    <string name="search_mode_tag">ЖАНР</string>
+    <string name="playback_status_playing">Играет • %1$s</string>
+    <string name="playback_status_paused">Пауза • %1$s</string>
+    <string name="now_playing_live">ЭФИР</string>
+    <string name="content_desc_play">Воспроизвести</string>
+    <string name="content_desc_pause">Пауза</string>
+    <string name="content_desc_clear">Очистить</string>
 </resources>

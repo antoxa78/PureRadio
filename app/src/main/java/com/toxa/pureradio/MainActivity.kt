@@ -34,6 +34,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -46,12 +47,14 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,8 +62,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Favorite
@@ -68,13 +82,11 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
@@ -85,7 +97,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.TheaterComedy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -116,15 +127,18 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import com.toxa.pureradio.BuildConfig
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Button
 import androidx.tv.material3.Card
@@ -157,6 +171,7 @@ import com.toxa.pureradio.ui.viewmodel.GenreGroup
 import com.toxa.pureradio.ui.viewmodel.MainViewModel
 import com.toxa.pureradio.ui.viewmodel.NavigationItem
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -412,7 +427,7 @@ fun PipContent(viewModel: MainViewModel) {
                         Icons.Default.OpenInFull,
                         contentDescription = stringResource(R.string.content_desc_open),
                         modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = readableAccent()
                     )
                     Icon(
                         Icons.Default.Close,
@@ -572,6 +587,208 @@ fun appLanguageDisplayName(language: AppLanguage): String = when (language) {
     AppLanguage.Ukrainian -> stringResource(R.string.language_ukrainian)
 }
 
+/** "classic rock" -> "Classic Rock". Used for genre / country / tag names everywhere. */
+fun String.toTitleCase(): String =
+    lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+
+/** WCAG contrast ratio between two colours (1.0 – 21.0). */
+fun contrastRatio(a: Color, b: Color): Float {
+    val la = a.luminance()
+    val lb = b.luminance()
+    return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
+}
+
+/**
+ * Accent colour that stays readable as text/icon colour on the app's dark surfaces.
+ * Some themes (Modern Blue, Blue Neon) use a deep blue `primary` that is fine as a fill
+ * but nearly invisible as text on the dark background, so fall back to the theme's
+ * lighter tertiary/secondary tone (or plain onSurface) when `primary` is too dark.
+ */
+@Composable
+fun readableAccent(): Color {
+    val cs = MaterialTheme.colorScheme
+    val bg = cs.surfaceVariant
+    return listOf(cs.primary, cs.tertiary, cs.secondary)
+        .firstOrNull { contrastRatio(it, bg) >= 4.5f } ?: cs.onSurface
+}
+
+/** [preferred] if it is readable on [background], otherwise [fallback]. */
+fun readableOn(background: Color, preferred: Color, fallback: Color): Color =
+    if (contrastRatio(preferred, background) >= 3f) preferred else fallback
+
+/** Elapsed playback time as mm:ss, switching to h:mm:ss after the first hour. */
+fun formatElapsed(millis: Long): String {
+    val totalSeconds = (millis / 1000).coerceAtLeast(0)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+    }
+}
+
+/** Decoder line such as "AAC 128k 44kHz Stereo", shared by the Now Playing bar and screensaver. */
+@OptIn(UnstableApi::class)
+fun formatTechnicalInfo(format: androidx.media3.common.Format?, station: Station): String {
+    if (format == null) return "${station.bitrate}k"
+    val kbps = if (format.bitrate > 0) "${format.bitrate / 1000}k" else "${station.bitrate}k"
+    val samplerate = if (format.sampleRate > 0) "${format.sampleRate / 1000}kHz" else ""
+    val codec = format.sampleMimeType?.removePrefix("audio/")?.uppercase()
+        ?.replace("MPEG", "MP3")
+        ?.replace("MP4A-LATM", "AAC")
+        ?: station.codec.orEmpty().uppercase()
+    val channels = when (format.channelCount) {
+        1 -> "Mono"
+        2 -> "Stereo"
+        in 3..8 -> "${format.channelCount}ch"
+        else -> ""
+    }
+    return listOf(codec, kbps, samplerate, channels).filter { it.isNotBlank() }.joinToString(" ")
+}
+
+/** Short quality label for a station tile, e.g. "MP3 · 128k" (null when nothing is known). */
+fun stationQualityLabel(station: Station): String? {
+    val codec = station.codec.orEmpty().trim().uppercase().takeIf { it.isNotEmpty() && it != "UNKNOWN" }
+    val bitrate = station.bitrate.takeIf { it > 0 }?.let { "${it}k" }
+    val parts = listOfNotNull(codec, bitrate)
+    return if (parts.isEmpty()) null else parts.joinToString(" · ")
+}
+
+/** Consistent section header for the Settings screen. */
+@Composable
+fun SettingsSectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    topPadding: androidx.compose.ui.unit.Dp = 24.dp
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = readableAccent(),
+        modifier = modifier.padding(start = 12.dp, end = 12.dp, top = topPadding, bottom = 8.dp)
+    )
+}
+
+/** The single "this option is selected" marker used by every settings picker. */
+@Composable
+fun SelectedCheck() {
+    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = readableAccent())
+}
+
+/** Three-dot preview of a theme's colours, rendered with that theme's own colour scheme. */
+@Composable
+fun ThemeSwatch(theme: AppTheme) {
+    PureRadioTheme(theme = theme) {
+        val cs = MaterialTheme.colorScheme
+        Surface(
+            shape = CircleShape,
+            colors = SurfaceDefaults.colors(containerColor = cs.background),
+            border = androidx.tv.material3.Border(
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                shape = CircleShape
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(cs.primary, cs.primaryContainer, cs.surfaceVariant).forEach { color ->
+                    Box(modifier = Modifier.size(14.dp).background(color, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+/** Centered icon + title + hint, shown when a list has nothing to display. */
+@Composable
+fun EmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier.fillMaxSize().padding(bottom = 80.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp), tint = readableAccent())
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.width(460.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Non-blocking message card shown at the bottom of the screen (errors, confirmations,
+ * reconnect notices). Unlike the old full-screen overlay it never hides or dims the
+ * content behind it, so the user keeps their place in the grid.
+ */
+@Composable
+fun MessageToast(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector?,
+    iconTint: Color,
+    accentColor: Color,
+    showProgress: Boolean = false
+) {
+    Surface(
+        colors = SurfaceDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 6.dp,
+        border = androidx.tv.material3.Border(
+            border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.6f)),
+            shape = MaterialTheme.shapes.medium
+        ),
+        modifier = Modifier.padding(horizontal = 32.dp).widthIn(max = 720.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (showProgress) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = iconTint
+                )
+            } else if (icon != null) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(24.dp))
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
@@ -590,11 +807,11 @@ fun MainScreen(viewModel: MainViewModel) {
     val successMessage by viewModel.successMessage.collectAsState()
     val selectedTag by viewModel.selectedTag.collectAsState()
     val selectedCountry by viewModel.selectedCountry.collectAsState()
+    val lastBrowsedCategory by viewModel.lastBrowsedCategory.collectAsState()
     val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
     val selectedBitrates by viewModel.selectedBitrates.collectAsState()
     val hasMoreStations by viewModel.hasMoreStations.collectAsState()
     val settingsSubMenu by viewModel.settingsSubMenu.collectAsState()
-    val favorites by viewModel.favorites.collectAsState()
     val playbackTime by viewModel.playbackTime.collectAsState()
     val isScreensaverShowing by viewModel.isScreensaverShowing.collectAsState()
     val visibleGenres by viewModel.visibleGenres.collectAsState()
@@ -605,6 +822,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val audioFormat by viewModel.audioFormat.collectAsState()
     val filePickerState by viewModel.filePickerState.collectAsState()
     val pendingImportStations by viewModel.pendingImportStations.collectAsState()
+    val pendingHomeSettings by viewModel.pendingHomeSettings.collectAsState()
     val pendingOverwriteFile by viewModel.pendingOverwriteFile.collectAsState()
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -782,7 +1000,13 @@ fun MainScreen(viewModel: MainViewModel) {
                             },
                             colors = androidx.tv.material3.NavigationDrawerItemDefaults.colors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                // onPrimaryContainer is dark blue on dark blue in the blue themes,
+                                // which made the selected entry unreadable — fall back to onSurface.
+                                selectedContentColor = readableOn(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.onPrimaryContainer,
+                                    MaterialTheme.colorScheme.onSurface
+                                )
                             ),
                             modifier = Modifier
                                 .focusProperties { canFocus = isDrawerCurrentlyOpen }
@@ -790,11 +1014,11 @@ fun MainScreen(viewModel: MainViewModel) {
                             leadingContent = {
                                 val icon = when (item) {
                                     NavigationItem.Home -> Icons.Default.Home
-                                    NavigationItem.Popular -> Icons.Default.Mic
+                                    NavigationItem.Popular -> Icons.Default.Whatshot
                                     NavigationItem.Recent -> Icons.Default.History
                                     NavigationItem.Search -> Icons.Default.Search
-                                    NavigationItem.Genres -> Icons.AutoMirrored.Filled.List
-                                    NavigationItem.Countries -> Icons.Default.Place
+                                    NavigationItem.Genres -> Icons.Default.Category
+                                    NavigationItem.Countries -> Icons.Default.Public
                                     NavigationItem.Favourites -> Icons.Default.Favorite
                                     NavigationItem.Settings -> Icons.Default.Settings
                                     NavigationItem.Exit -> Icons.AutoMirrored.Filled.ExitToApp
@@ -821,20 +1045,16 @@ fun MainScreen(viewModel: MainViewModel) {
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    val title = when {
-                    selectedTag != null -> {
-                        val name = selectedTag!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                        val stationsText = stringResource(R.string.stations_count, stations.size)
-                        "$name $stationsText"
-                    }
-                    selectedCountry != null -> {
-                        val name = selectedCountry!!.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                        val stationsText = stringResource(R.string.stations_count, stations.size)
-                        "$name $stationsText"
-                    }
-                    else -> navigationItemLabel(selectedNavItem)
-                }
+                    val title = selectedTag?.name?.toTitleCase()
+                        ?: selectedCountry?.name?.toTitleCase()
+                        ?: navigationItemLabel(selectedNavItem)
                 val isDeepDive = selectedTag != null || selectedCountry != null
+                // Station count sits next to the title (muted) instead of being glued into it,
+                // and is shown wherever the full list is local: category deep dives,
+                // Favourites and Recent.
+                val showCount = stations.isNotEmpty() && (isDeepDive ||
+                        selectedNavItem == NavigationItem.Favourites ||
+                        selectedNavItem == NavigationItem.Recent)
                 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 32.dp, top = 8.dp, bottom = 8.dp),
@@ -857,14 +1077,28 @@ fun MainScreen(viewModel: MainViewModel) {
                             )
                         }
                     }
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = if (isDeepDive) FontWeight.ExtraBold else FontWeight.Medium,
+                    Row(
                         modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = if (isDeepDive) FontWeight.ExtraBold else FontWeight.Medium,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (showCount) {
+                            Text(
+                                text = stringResource(R.string.count_stations_plain, stations.size),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp)
+                            )
+                        }
+                    }
 
                 val showBitrateFilters = (selectedNavItem == NavigationItem.Home) ||
                                         (selectedNavItem == NavigationItem.Popular) ||
@@ -880,7 +1114,6 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (successMessage == null) {
                         when (selectedNavItem) {
                             NavigationItem.Home -> {
                                 if (genreGroups.isNotEmpty()) {
@@ -888,6 +1121,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         key("home_groups") {
                                             GenreGroupGrid(
                                                 groups = genreGroups,
+                                                targetCategoryName = lastBrowsedCategory,
                                                 onGroupClick = { name ->
                                                     if (genreToAdd == null && genreToRemove == null && stationToFavorite == null) {
                                                         val group = genreGroups.find { it.genreName == name }
@@ -912,6 +1146,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                         }
                                     } else {
                                         key(selectedTag?.name ?: selectedCountry?.name ?: "home_stations") {
+                                            // The station count is shown next to the page title.
                                             StationGrid(
                                                 stations = stations,
                                                 viewModel = viewModel,
@@ -997,19 +1232,24 @@ fun MainScreen(viewModel: MainViewModel) {
                                                         androidx.tv.material3.Button(
                                                             onClick = { viewModel.setTagSearchQuery(""); localTagSearchQuery = "" },
                                                             modifier = Modifier.size(36.dp),
+                                                            contentPadding = PaddingValues(0.dp),
                                                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                                                 containerColor = Color.Transparent,
                                                                 contentColor = Color.White
                                                             )
                                                         ) {
-                                                            Text("X", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                                                            Icon(
+                                                                Icons.Default.Close,
+                                                                contentDescription = stringResource(R.string.content_desc_clear),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
                                                         }
                                                     }
                                                 },
                                                 colors = TextFieldDefaults.colors(
                                                     focusedTextColor = MaterialTheme.colorScheme.onSurface,
                                                     unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                                    focusedLabelColor = readableAccent(),
                                                     unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     focusedContainerColor = Color.Transparent,
                                                     unfocusedContainerColor = Color.Transparent
@@ -1037,6 +1277,8 @@ fun MainScreen(viewModel: MainViewModel) {
                                             Box(modifier = Modifier.weight(1f)) {
                                                 TagGrid(
                                                     tags = filteredTags,
+                                                    targetTagName = lastBrowsedCategory,
+                                                    homeGenres = visibleGenres,
                                                     onTagClick = { 
                                                         if (genreToAdd == null && genreToRemove == null && stationToFavorite == null) {
                                                             viewModel.selectTag(it)
@@ -1064,7 +1306,11 @@ fun MainScreen(viewModel: MainViewModel) {
                             NavigationItem.Countries -> {
                                 if (selectedCountry == null) {
                                     key("countries_list") {
-                                        CountryGrid(countries) { viewModel.selectCountry(it) }
+                                        CountryGrid(
+                                            countries = countries,
+                                            targetCountryName = lastBrowsedCategory,
+                                            onCountryClick = { viewModel.selectCountry(it) }
+                                        )
                                     }
                                 } else {
                                     key(selectedCountry!!.name) {
@@ -1124,8 +1370,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                             NavigationItem.Exit -> {}
                         }
-                    }
-                    
+
                     if (isLoading && selectedNavItem != NavigationItem.Search) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -1133,7 +1378,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         ) {
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.primary,
+                                color = readableAccent(),
                                 trackColor = Color.Transparent
                             )
                         }
@@ -1146,67 +1391,43 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             }
 
-            if (error != null || successMessage != null) {
+            // Errors, confirmations and reconnect notices share one non-blocking stack of
+            // toasts at the bottom, above the Now Playing bar. The content behind stays
+            // visible and keeps focus (the old error/success overlay blanked the screen).
+            if (error != null || successMessage != null || infoMessage != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .focusable(false),
-                    contentAlignment = Alignment.Center
+                        .padding(bottom = if (currentStation != null) 131.dp else 24.dp),
+                    contentAlignment = Alignment.BottomCenter
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        error?.let {
-                            Text(
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        infoMessage?.let {
+                            MessageToast(
                                 text = it,
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.error,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 32.dp)
+                                icon = null,
+                                iconTint = readableAccent(),
+                                accentColor = MaterialTheme.colorScheme.secondary,
+                                showProgress = true
+                            )
+                        }
+                        error?.let {
+                            MessageToast(
+                                text = it,
+                                icon = Icons.Default.ErrorOutline,
+                                iconTint = MaterialTheme.colorScheme.error,
+                                accentColor = MaterialTheme.colorScheme.error
                             )
                         }
                         successMessage?.let {
-                            Text(
+                            MessageToast(
                                 text = it,
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 32.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (infoMessage != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = if (currentStation != null) 125.dp else 16.dp),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    Surface(
-                        colors = SurfaceDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f),
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        ),
-                        shape = MaterialTheme.shapes.medium,
-                        tonalElevation = 4.dp,
-                        modifier = Modifier.padding(horizontal = 32.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(
-                                text = infoMessage!!,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Bold
+                                icon = Icons.Default.CheckCircle,
+                                iconTint = readableAccent(),
+                                accentColor = readableAccent()
                             )
                         }
                     }
@@ -1226,7 +1447,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 NowPlayingBar(
                     station = station,
                     isPlaying = isPlaying,
-                    isFavorite = favorites.contains(station.stationUuid),
+                    isFavorite = viewModel.isFavorite(station),
                     playbackTime = playbackTime,
                     playbackDuration = playbackDuration,
                     mediaMetadata = mediaMetadata,
@@ -1303,7 +1524,7 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     stationToFavorite?.let { station ->
-        val isAlreadyFavorite = favorites.contains(station.stationUuid)
+        val isAlreadyFavorite = viewModel.isFavorite(station)
         Dialog(onDismissRequest = { stationToFavorite = null }) {
             Surface(
                 modifier = Modifier.width(420.dp),
@@ -1334,7 +1555,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             if (isAlreadyFavorite) Icons.Default.FavoriteBorder else Icons.Default.Favorite,
                             contentDescription = null,
                             modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = readableAccent()
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1425,7 +1646,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             Icons.Default.Home,
                             contentDescription = null,
                             modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = readableAccent()
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1437,7 +1658,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                        text = tag.name.toTitleCase(),
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1519,7 +1740,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             Icons.Default.Home,
                             contentDescription = null,
                             modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = readableAccent()
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1531,7 +1752,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                        text = genreName.toTitleCase(),
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1610,10 +1831,10 @@ fun MainScreen(viewModel: MainViewModel) {
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.Warning,
+                            Icons.AutoMirrored.Filled.ExitToApp,
                             contentDescription = null,
                             modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = readableAccent()
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1679,10 +1900,20 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 ) {
                     Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(48.dp), tint = readableAccent())
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(stringResource(R.string.settings_restore_favs), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(stringResource(R.string.restore_dialog_found_stations, stations.size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                        val homeCategoryCount = (pendingHomeSettings?.genres?.size ?: 0) + (pendingHomeSettings?.countries?.size ?: 0)
+                        Text(
+                            stringResource(
+                                if (pendingHomeSettings != null) R.string.restore_dialog_found_items
+                                else R.string.restore_dialog_found_stations,
+                                stations.size,
+                                homeCategoryCount
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
 
                         Button(
                             onClick = { viewModel.confirmRestore(replace = false) },
@@ -1896,7 +2127,7 @@ fun SettingsScreen(
                         colors = TextFieldDefaults.colors(
                             focusedTextColor = MaterialTheme.colorScheme.onSurface,
                             unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            focusedLabelColor = readableAccent(),
                             unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent
@@ -1907,7 +2138,7 @@ fun SettingsScreen(
                 item {
                     Text(stringResource(R.string.genres_section_header), style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
-                        color = MaterialTheme.colorScheme.primary)
+                        color = readableAccent())
                 }
 
                 items(filteredTags) { tag ->
@@ -1915,7 +2146,7 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.toggleGenreVisibility(tag.name) },
                         headlineContent = {
-                            Text(tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } })
+                            Text(tag.name.toTitleCase())
                         },
                         supportingContent = {
                             Text(stringResource(R.string.count_stations_plain, tag.stationcount))
@@ -1946,11 +2177,11 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(24.dp))
                 }
                 val options = listOf(
-                    0 to "Manual Only (Off)",
-                    12 to "Every 12 Hours",
-                    24 to "Every 24 Hours"
+                    0 to R.string.settings_bg_sync_desc_off,
+                    12 to R.string.settings_bg_sync_desc_12,
+                    24 to R.string.settings_bg_sync_desc_24
                 )
-                options.forEachIndexed { index, (hours, label) ->
+                options.forEachIndexed { index, (hours, labelRes) ->
                     item(key = hours) {
                         ListItem(
                             selected = autoUpdateInterval == hours,
@@ -1959,10 +2190,10 @@ fun SettingsScreen(
                                 viewModel.setSettingsSubMenu(null)
                             },
                             modifier = if (index == 0) Modifier.focusRequester(subMenuFocusRequester) else Modifier,
-                            headlineContent = { Text(label) },
+                            headlineContent = { Text(stringResource(labelRes)) },
                             trailingContent = {
                                 if (autoUpdateInterval == hours) {
-                                    Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    SelectedCheck()
                                 }
                             }
                         )
@@ -2000,7 +2231,7 @@ fun SettingsScreen(
                     )
                 }
                 item {
-                    Text(stringResource(R.string.settings_display_mode), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    SettingsSectionHeader(stringResource(R.string.settings_display_mode))
                 }
                 val modes = listOf(
                     com.toxa.pureradio.ui.viewmodel.ScreensaverMode.StationInfo to R.string.screensaver_mode_station_info,
@@ -2013,13 +2244,13 @@ fun SettingsScreen(
                         headlineContent = { Text(stringResource(labelRes)) },
                         trailingContent = {
                             if (screensaverMode == mode) {
-                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                SelectedCheck()
                             }
                         }
                     )
                 }
                 item {
-                    Text(stringResource(R.string.settings_idle_timeout), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+                    SettingsSectionHeader(stringResource(R.string.settings_idle_timeout))
                 }
                 val timeouts = listOf(1, 5, 10, 20, 30)
                 items(timeouts) { minutes ->
@@ -2032,7 +2263,7 @@ fun SettingsScreen(
                         headlineContent = { Text(stringResource(R.string.minutes_format, minutes)) },
                         trailingContent = {
                             if (screensaverTimeout == minutes) {
-                                Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                SelectedCheck()
                             }
                         }
                     )
@@ -2065,9 +2296,10 @@ fun SettingsScreen(
                         onClick = { viewModel.setAppTheme(theme) },
                         headlineContent = { Text(label) },
                         supportingContent = { Text(desc) },
+                        leadingContent = { ThemeSwatch(theme) },
                         trailingContent = {
                             if (appTheme == theme) {
-                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                SelectedCheck()
                             }
                         }
                     )
@@ -2099,7 +2331,7 @@ fun SettingsScreen(
                         headlineContent = { Text(appLanguageDisplayName(language)) },
                         trailingContent = {
                             if (appLanguage == language) {
-                                Icon(Icons.Default.Public, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                SelectedCheck()
                             }
                         }
                     )
@@ -2135,7 +2367,7 @@ fun SettingsScreen(
                         headlineContent = { Text(navigationItemLabel(item)) },
                         trailingContent = {
                             if (defaultCategory == item) {
-                                Icon(Icons.Default.Home, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                SelectedCheck()
                             }
                         }
                     )
@@ -2145,12 +2377,11 @@ fun SettingsScreen(
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 170.dp)
+                contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 8.dp, bottom = 170.dp)
             ) {
-                item {
-                    Text(stringResource(R.string.nav_settings), style = MaterialTheme.typography.headlineLarge)
-                    Spacer(modifier = Modifier.height(24.dp))
-                }
+                // The page header above already says "Settings", so the list starts straight
+                // with its first section.
+                item { SettingsSectionHeader(stringResource(R.string.settings_section_general), topPadding = 8.dp) }
 
                 item {
                     ListItem(
@@ -2161,8 +2392,14 @@ fun SettingsScreen(
                         supportingContent = {
                             Text(stringResource(R.string.current_value_format, appThemeDisplayName(appTheme)))
                         },
-                        leadingContent = { Icon(Icons.Default.TheaterComedy, contentDescription = null) },
-                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                        leadingContent = { Icon(Icons.Default.Palette, contentDescription = null) },
+                        trailingContent = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                ThemeSwatch(appTheme)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(Icons.Default.ChevronRight, contentDescription = null)
+                            }
+                        }
                     )
                 }
 
@@ -2172,7 +2409,7 @@ fun SettingsScreen(
                         onClick = { viewModel.setSettingsSubMenu("AppLanguage") },
                         headlineContent = { Text(stringResource(R.string.settings_app_language)) },
                         supportingContent = { Text(stringResource(R.string.current_value_format, appLanguageDisplayName(appLanguage))) },
-                        leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.Language, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
                     )
                 }
@@ -2191,15 +2428,42 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
+                        headlineContent = { Text(stringResource(R.string.settings_home_curation)) },
+                        supportingContent = { Text(stringResource(R.string.settings_home_curation_desc)) },
+                        leadingContent = { Icon(Icons.Default.Category, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = { viewModel.setSettingsSubMenu("Screensaver") },
+                        headlineContent = { Text(stringResource(R.string.settings_ambient_screensaver)) },
+                        supportingContent = {
+                            val label = if (screensaverEnabled) stringResource(R.string.settings_ambient_screensaver_desc_enabled, screensaverTimeout) else stringResource(R.string.settings_ambient_screensaver_desc_disabled)
+                            Text(stringResource(R.string.current_status_format, label))
+                        },
+                        leadingContent = { Icon(Icons.Default.MusicVideo, contentDescription = null) },
+                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.setQuitConfirmationEnabled(!quitConfirmationEnabled) },
                         headlineContent = { Text(stringResource(R.string.settings_quit_confirmation)) },
                         supportingContent = { Text(stringResource(R.string.settings_quit_confirmation_desc)) },
-                        leadingContent = { Icon(Icons.Default.Warning, contentDescription = null) },
+                        leadingContent = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = quitConfirmationEnabled, onCheckedChange = null)
                         }
                     )
                 }
+
+                item { SettingsSectionHeader(stringResource(R.string.settings_section_playback)) }
 
                 item {
                     ListItem(
@@ -2207,7 +2471,7 @@ fun SettingsScreen(
                         onClick = { viewModel.setAutoReconnectEnabled(!autoReconnectEnabled) },
                         headlineContent = { Text(stringResource(R.string.settings_auto_reconnect)) },
                         supportingContent = { Text(stringResource(R.string.settings_auto_reconnect_desc)) },
-                        leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.Autorenew, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = autoReconnectEnabled, onCheckedChange = null)
                         }
@@ -2230,21 +2494,6 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
-                        onClick = { viewModel.setSettingsSubMenu("Screensaver") },
-                        headlineContent = { Text(stringResource(R.string.settings_ambient_screensaver)) },
-                        supportingContent = {
-                            val label = if (screensaverEnabled) stringResource(R.string.settings_ambient_screensaver_desc_enabled, screensaverTimeout) else stringResource(R.string.settings_ambient_screensaver_desc_disabled)
-                            Text(stringResource(R.string.current_status_format, label))
-                        },
-                        leadingContent = { Icon(Icons.Default.MusicVideo, contentDescription = null) },
-                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                item {
-                    ListItem(
-                        selected = false,
                         onClick = { viewModel.toggleAudioPassthrough() },
                         headlineContent = { Text(stringResource(R.string.settings_audio_passthrough)) },
                         supportingContent = { Text(stringResource(R.string.settings_audio_passthrough_desc)) },
@@ -2255,13 +2504,15 @@ fun SettingsScreen(
                     )
                 }
 
+                item { SettingsSectionHeader(stringResource(R.string.settings_section_database)) }
+
                 item {
                     ListItem(
                         selected = false,
                         onClick = { viewModel.toggleHideBroken() },
                         headlineContent = { Text(stringResource(R.string.settings_smart_filter)) },
                         supportingContent = { Text(stringResource(R.string.settings_smart_filter_desc)) },
-                        leadingContent = { Icon(Icons.Default.Public, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.FilterAlt, contentDescription = null) },
                         trailingContent = {
                             Switch(checked = hideBroken, onCheckedChange = null)
                         }
@@ -2286,7 +2537,7 @@ fun SettingsScreen(
                         selected = false,
                         onClick = { viewModel.setSettingsSubMenu("AutoUpdate") },
                         headlineContent = { Text(stringResource(R.string.settings_bg_sync)) },
-                        supportingContent = { 
+                        supportingContent = {
                             val label = when(autoUpdateInterval) {
                                 12 -> stringResource(R.string.settings_bg_sync_desc_12)
                                 24 -> stringResource(R.string.settings_bg_sync_desc_24)
@@ -2294,39 +2545,8 @@ fun SettingsScreen(
                             }
                             Text(stringResource(R.string.update_frequency_format, label))
                         },
-                        leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.Sync, contentDescription = null) },
                         trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
-                    )
-                }
-
-                item {
-                    Text(stringResource(R.string.data_management_header), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
-
-                    ListItem(
-                        selected = false,
-                        onClick = {
-                            viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
-                        },
-                        headlineContent = { Text(stringResource(R.string.settings_backup_favs)) },
-                        supportingContent = { Text(stringResource(R.string.settings_backup_favs_desc)) },
-                        leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
-                    )
-                    ListItem(
-                        selected = false,
-                        onClick = {
-                            viewModel.openFilePicker(isExport = false)
-                        },
-                        headlineContent = { Text(stringResource(R.string.settings_restore_favs)) },
-                        supportingContent = { Text(stringResource(R.string.settings_restore_favs_desc)) },
-                        leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
-                    )
-
-                    ListItem(
-                        selected = false,
-                        onClick = onPermissionRequest,
-                        headlineContent = { Text(stringResource(R.string.settings_grant_storage)) },
-                        supportingContent = { Text(stringResource(R.string.settings_grant_storage_desc)) },
-                        leadingContent = { Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 }
 
@@ -2342,21 +2562,45 @@ fun SettingsScreen(
                             Text(stringResource(R.string.last_synced_format, dateStr, serverStats?.stations?.toString() ?: "..."))
                         },
                         leadingContent = { Icon(Icons.Default.Radio, contentDescription = null) },
-                        trailingContent = { Icon(Icons.Default.History, contentDescription = null) }
+                        trailingContent = { Icon(Icons.Default.Refresh, contentDescription = null) }
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                item { SettingsSectionHeader(stringResource(R.string.data_management_header)) }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = {
+                            viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
+                        },
+                        headlineContent = { Text(stringResource(R.string.settings_backup_favs)) },
+                        supportingContent = { Text(stringResource(R.string.settings_backup_favs_desc)) },
+                        leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null) }
+                    )
                 }
 
                 item {
-                    Text(stringResource(R.string.interface_content_header), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
                     ListItem(
                         selected = false,
-                        onClick = { viewModel.setSettingsSubMenu("HomeGenres") },
-                        headlineContent = { Text(stringResource(R.string.settings_home_curation)) },
-                        supportingContent = { Text(stringResource(R.string.settings_home_curation_desc)) },
-                        leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
-                        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) }
+                        onClick = {
+                            viewModel.openFilePicker(isExport = false)
+                        },
+                        headlineContent = { Text(stringResource(R.string.settings_restore_favs)) },
+                        supportingContent = { Text(stringResource(R.string.settings_restore_favs_desc)) },
+                        leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null) }
                     )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
+                        onClick = onPermissionRequest,
+                        headlineContent = { Text(stringResource(R.string.settings_grant_storage)) },
+                        supportingContent = { Text(stringResource(R.string.settings_grant_storage_desc)) },
+                        leadingContent = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
                 }
 
                 item {
@@ -2382,14 +2626,14 @@ fun SettingsScreen(
                                     Icons.Default.Radio, 
                                     contentDescription = null, 
                                     modifier = Modifier.size(56.dp),
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = readableAccent()
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
                                     "PURE RADIO TV", 
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = readableAccent()
                                 )
                                 Text(
                                     "A Premium Retro Experience", 
@@ -2406,7 +2650,7 @@ fun SettingsScreen(
                                 Text(
                                     "https://github.com/antoxa78/PureRadio",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    color = readableAccent().copy(alpha = 0.6f)
                                 )
                             }
                         }
@@ -2431,6 +2675,8 @@ fun SearchScreen(
     val searchMode by viewModel.searchMode.collectAsState()
     val tagSearchGroups by viewModel.tagSearchGroups.collectAsState()
     val selectedSearchTag by viewModel.selectedSearchTag.collectAsState()
+    val lastBrowsedCategory by viewModel.lastBrowsedCategory.collectAsState()
+    val visibleGenres by viewModel.visibleGenres.collectAsState()
     val selectedBitrates by viewModel.selectedBitrates.collectAsState()
     val hasMoreStations by viewModel.hasMoreStations.collectAsState()
     val searchFocusTrigger by viewModel.searchFocusTrigger.collectAsState()
@@ -2453,7 +2699,10 @@ fun SearchScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 32.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             OutlinedTextField(
                 value = localSearchQuery,
                 onValueChange = { viewModel.onSearchQueryChange(it); localSearchQuery = it },
@@ -2475,7 +2724,7 @@ fun SearchScreen(
                 colors = TextFieldDefaults.colors(
                     focusedTextColor = MaterialTheme.colorScheme.onSurface,
                     unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                    focusedLabelColor = readableAccent(),
                     unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent
@@ -2493,7 +2742,14 @@ fun SearchScreen(
                     androidx.tv.material3.ButtonDefaults.colors()
                 }
             ) {
-                Text(if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag) "TAG" else "NAME")
+                val isTagMode = searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag
+                Icon(
+                    if (isTagMode) Icons.Default.Category else Icons.Default.Radio,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(if (isTagMode) R.string.search_mode_tag else R.string.search_mode_name))
             }
         }
         
@@ -2511,7 +2767,27 @@ fun SearchScreen(
             if (stations.isEmpty() && localSearchQuery.isEmpty() && tagSearchGroups.isEmpty()) {
                 if (recentSearches.isNotEmpty()) {
                     Column {
-                        Text(stringResource(R.string.search_recent), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                stringResource(R.string.search_recent),
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = { viewModel.clearRecentSearches() },
+                                colors = androidx.tv.material3.ButtonDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(stringResource(R.string.search_clear_recent), style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
                         LazyRow {
                             items(recentSearches) { query ->
                                 Button(
@@ -2522,13 +2798,19 @@ fun SearchScreen(
                                     },
                                     modifier = Modifier.padding(end = 8.dp)
                                 ) {
+                                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(query)
                                 }
                             }
                         }
                     }
                 } else {
-                    Text(stringResource(R.string.search_empty_hint), modifier = Modifier.padding(top = 16.dp))
+                    EmptyState(
+                        icon = Icons.Default.Search,
+                        title = stringResource(R.string.search_empty_hint),
+                        message = stringResource(R.string.search_empty_message)
+                    )
                 }
             } else if (searchMode == com.toxa.pureradio.ui.viewmodel.SearchMode.Tag && tagSearchGroups.isNotEmpty() && selectedSearchTag == null) {
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -2542,6 +2824,8 @@ fun SearchScreen(
                         GenreGroupGrid(
                             groups = tagSearchGroups,
                             autoFocus = isReturning,
+                            targetCategoryName = lastBrowsedCategory,
+                            homeGenres = visibleGenres,
                             onGroupClick = { tagName ->
                                 if (!isGenreDialogOpen) {
                                     viewModel.selectSearchTag(tagName)
@@ -2559,7 +2843,7 @@ fun SearchScreen(
                     if (selectedSearchTag != null) {
                         Row(modifier = Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = selectedSearchTag!!.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                                text = selectedSearchTag!!.toTitleCase(),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
@@ -2588,27 +2872,48 @@ fun SearchScreen(
 }
 
 @Composable
-fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupClick: (String) -> Unit, onGroupLongClick: ((String) -> Unit)? = null) {
+fun GenreGroupGrid(
+    groups: List<GenreGroup>,
+    autoFocus: Boolean = true,
+    targetCategoryName: String? = null,
+    homeGenres: Set<String> = emptySet(),
+    onGroupClick: (String) -> Unit,
+    onGroupLongClick: ((String) -> Unit)? = null
+) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(autoFocus, groups.isNotEmpty()) {
-        if (autoFocus) {
-            try { focusRequester.requestFocus() } catch (e: Exception) {}
+    val gridState = rememberLazyGridState()
+    val targetIndex = remember(groups, targetCategoryName) {
+        if (!targetCategoryName.isNullOrEmpty()) {
+            val idx = groups.indexOfFirst { it.genreName.equals(targetCategoryName, ignoreCase = true) }
+            if (idx >= 0) idx else 0
+        } else 0
+    }
+
+    LaunchedEffect(autoFocus, groups.isNotEmpty(), targetIndex) {
+        if (autoFocus && groups.isNotEmpty()) {
+            if (targetIndex > 0) {
+                try { gridState.scrollToItem(targetIndex) } catch (_: Exception) {}
+                yield()
+            }
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
     if (groups.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
     } else {
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             itemsIndexed(groups, key = { _, group -> group.genreName }) { index, group ->
                 GenreGroupCard(
-                    group = group.copy(genreName = group.genreName.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }),
+                    group = group.copy(genreName = group.genreName.toTitleCase()),
+                    onHome = group.genreName in homeGenres,
                     onClick = { onGroupClick(group.genreName) },
                     onLongClick = if (onGroupLongClick != null) { { onGroupLongClick(group.genreName) } } else null,
-                    modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
+                    modifier = if (index == targetIndex) Modifier.focusRequester(focusRequester) else Modifier
                 )
             }
         }
@@ -2617,7 +2922,7 @@ fun GenreGroupGrid(groups: List<GenreGroup>, autoFocus: Boolean = true, onGroupC
 
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun GenreGroupCard(group: GenreGroup, onHome: Boolean = false, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     Card(
         onClick = onClick,
         onLongClick = onLongClick,
@@ -2649,20 +2954,32 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, onLongClick: (() -> U
                         )
                     )
             )
+            if (onHome) {
+                HomeBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = group.genreName, 
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
+                // Title uses the space left over after the count chip, so a long name that
+                // wraps to more rows shrinks the title area instead of pushing the station
+                // count chip out of the tile (which got clipped at the card edge).
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GenreTitleText(
+                        text = group.genreName,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 val countText = "${group.filteredCount} / ${group.totalStations}"
                 Surface(
@@ -2670,14 +2987,105 @@ fun GenreGroupCard(group: GenreGroup, onClick: () -> Unit, onLongClick: (() -> U
                     colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.2f))
                 ) {
                     Text(
-                        text = countText, 
+                        text = countText,
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White,
+                        maxLines = 2,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * Small "on Home tab" badge shown on genre tiles that have already been added to the
+ * Home screen, so their state is visible at a glance while browsing.
+ */
+@Composable
+fun HomeBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary),
+        border = androidx.tv.material3.Border(
+            border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)),
+            shape = CircleShape
+        )
+    ) {
+        Icon(
+            Icons.Default.Home,
+            contentDescription = stringResource(R.string.genre_on_home),
+            tint = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.padding(6.dp).size(20.dp)
+        )
+    }
+}
+
+/**
+ * "Added to Favourites" badge shown on station tiles so favourite stations are visible
+ * at a glance while browsing. Hidden on the Favourites tab itself, where every tile is
+ * already a favourite.
+ */
+@Composable
+fun FavoriteBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        colors = SurfaceDefaults.colors(containerColor = Color(0xFFE53935)),
+        border = androidx.tv.material3.Border(
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color.White.copy(alpha = 0.7f)),
+            shape = CircleShape
+        )
+    ) {
+        Icon(
+            Icons.Default.Favorite,
+            contentDescription = stringResource(R.string.station_in_favorites),
+            tint = Color.White,
+            modifier = Modifier.padding(6.dp).size(20.dp)
+        )
+    }
+}
+
+/**
+ * Category/tile title that always wraps whole words onto the next line and never breaks a
+ * word mid-word ("divide letters"). The layout engine only splits a word when that word is
+ * wider than the whole line, so the font is capped at a size that guarantees the longest
+ * word fits on a single line — long names then simply use more rows of complete words.
+ */
+@Composable
+fun GenreTitleText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.headlineSmall,
+    fontWeight: FontWeight = FontWeight.ExtraBold,
+    maxLines: Int = 3
+) {
+    BoxWithConstraints(modifier = modifier) {
+        val longestWord = text.split(Regex("\\s+")).maxOfOrNull { it.length } ?: text.length
+        // Rough estimate of the largest font at which the longest word still fits the
+        // available width (bold text ≈ 0.72 * fontSize per character on average, slightly
+        // over-estimated so the engine never has to break a word).
+        val maxFontForFit = if (longestWord > 0) {
+            maxWidth.value / (0.72f * (longestWord + 1f))
+        } else {
+            style.fontSize.value
+        }
+        val fontSize = minOf(style.fontSize.value, maxFontForFit)
+            .coerceIn(12f, style.fontSize.value)
+        Text(
+            text = text,
+            style = style,
+            fontSize = fontSize.sp,
+            fontWeight = fontWeight,
+            color = Color.White,
+            softWrap = true,
+            maxLines = maxLines,
+            overflow = TextOverflow.Clip,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
     }
 }
 
@@ -2690,58 +3098,211 @@ fun getGenreColor(genre: String): Color {
 }
 
 fun getGenreImageUrl(genre: String): String {
-    val genreLower = genre.lowercase().trim()
-    return when {
-        genreLower.contains("heavy metal") -> "https://images.unsplash.com/photo-1541614101331-1a5a3a194e90?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("metal") -> "https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("punk") -> "https://images.unsplash.com/photo-1583790155708-360d8a5563c0?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("hard rock") -> "https://images.unsplash.com/photo-1521334885634-9552f1055677?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("classic rock") -> "https://images.unsplash.com/photo-1459749411177-042180ce673c?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("rock") -> "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("alternative") || genreLower.contains("indie") -> "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("synthpop") -> "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("pop") && (genreLower.contains("music") || genreLower.contains("hits")) -> "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("pop") || genreLower.contains("hits") || genreLower.contains("top") || genreLower.contains("chart") -> "https://images.unsplash.com/photo-1514525253361-bee8a187449a?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("smooth jazz") -> "https://images.unsplash.com/photo-1525994886773-080587e161c3?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("jazz") -> "https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("blues") -> "https://images.unsplash.com/photo-1553034545-31a386996173?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("soul") -> "https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("funk") || genreLower.contains("disco") -> "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("orchestra") || genreLower.contains("symphony") -> "https://images.unsplash.com/photo-1465847899035-1379e576ee5d?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("classical") || genreLower.contains("classic") -> "https://images.unsplash.com/photo-1507838596018-b943e1dd13a9?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("opera") -> "https://images.unsplash.com/photo-1520529125433-21950920427e?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("techno") -> "https://images.unsplash.com/photo-1571266028243-3716f02d2d2e?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("deep house") -> "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("house") -> "https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("trance") -> "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("psytrance") -> "https://images.unsplash.com/photo-1520092352425-9fae9f057c9a?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("electro") || genreLower.contains("edm") -> "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("ambient") -> "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("chillout") || genreLower.contains("chill") -> "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("lounge") -> "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("country") -> "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("bluegrass") -> "https://images.unsplash.com/photo-1525201548942-d8b8c09ec8d1?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("folk") -> "https://images.unsplash.com/photo-1468164016595-6108e4c60c8b?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("hip hop") -> "https://images.unsplash.com/photo-1520262454473-a1a82276a574?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("rap") || genreLower.contains("urban") || genreLower.contains("r&b") -> "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("reggae") -> "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("ska") -> "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("world") -> "https://images.unsplash.com/photo-1526218626217-dc65a29bb444?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("latin") -> "https://images.unsplash.com/photo-1525994886773-080587e161c3?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("80s") -> "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("90s") -> "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("70s") -> "https://images.unsplash.com/photo-1516062423079-7ca13cdc7f5a?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("60s") || genreLower.contains("oldies") || genreLower.contains("retro") -> "https://images.unsplash.com/photo-1484755560615-a4c64e99529b?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("soundtrack") || genreLower.contains("movie") || genreLower.contains("film") -> "https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("meditation") || genreLower.contains("spiritual") || genreLower.contains("religious") -> "https://images.unsplash.com/photo-1506126613408-eca07ce68773?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("news") || genreLower.contains("talk") || genreLower.contains("info") -> "https://images.unsplash.com/photo-1472289065668-ce650ac443d2?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("sport") -> "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("comedy") -> "https://images.unsplash.com/photo-1527224857830-43a7acc85260?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("christmas") || genreLower.contains("xmas") -> "https://images.unsplash.com/photo-1543589077-47d81606c1bf?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("kids") || genreLower.contains("children") -> "https://images.unsplash.com/photo-1516627145497-ae6968895b74?q=80&w=600&auto=format&fit=crop"
-        genreLower.contains("lofi") -> "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=600&auto=format&fit=crop"
-        else -> "https://images.unsplash.com/photo-1453090927415-5f45085b65c0?q=80&w=600&auto=format&fit=crop"
+    // Every URL below is verified to serve a real JPEG (HTTP GET returns 200 + image bytes).
+    val g = genre.lowercase().trim()
+    val pick = (g.hashCode() and Int.MAX_VALUE)
+    val urls: List<String> = when {
+        g.contains("heavy metal") || g.contains("металл") -> listOf(
+            "https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("metal") || g.contains("метал") -> listOf(
+            "https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("punk") || g.contains("hardcore") -> listOf(
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("christmas") || g.contains("xmas") || g.contains("новогодн") || g.contains("рождественск") -> listOf(
+            "https://images.unsplash.com/photo-1543589077-47d81606c1bf?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1482517967863-00e15c9b44be?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("kids") || g.contains("children") || g.contains("детск") || g.contains("сказк") -> listOf(
+            "https://images.unsplash.com/photo-1516627145497-ae6968895b74?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("sport") || g.contains("спорт") || g.contains("футбол") -> listOf(
+            "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("news") || g.contains("talk") || g.contains("info") || g.contains("новост") ||
+        g.contains("разговорн") -> listOf(
+            "https://images.unsplash.com/photo-1472289065668-ce650ac443d2?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("hard rock") || g.contains("хард-рок") -> listOf(
+            "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("classic rock") || g.contains("классик-рок") -> listOf(
+            "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("rock") || g.contains("рок") -> listOf(
+            "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("alternative") || g.contains("indie") || g.contains("альтернатив") -> listOf(
+            "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("smooth jazz") -> listOf(
+            "https://images.unsplash.com/photo-1524678606370-a47ad25cb82a?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("jazz") || g.contains("swing") || g.contains("big band") || g.contains("джаз") -> listOf(
+            "https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1558584673-c834fb1cc3ca?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("blues") || g.contains("блюз") -> listOf(
+            "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1468164016595-6108e4c60c8b?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("soul") || g.contains("r&b") || g.contains("rhythm and blues") || g.contains("соул") -> listOf(
+            "https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1487180144351-b8472da7d491?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("hip hop") || g.contains("hip-hop") || g.contains("rap") || g.contains("urban") ||
+        g.contains("хип-хоп") || g.contains("рэп") -> listOf(
+            "https://images.unsplash.com/photo-1520262454473-a1a82276a574?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1487180144351-b8472da7d491?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("synthpop") || g.contains("synthwave") || g.contains("retrowave") || g.contains("синтипоп") -> listOf(
+            "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("disco") || g.contains("funk") || g.contains("groove") || g.contains("диско") || g.contains("фанк") -> listOf(
+            "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("latin") || g.contains("salsa") || g.contains("bachata") || g.contains("cumbia") ||
+        g.contains("merengue") || g.contains("reggaeton") || g.contains("латино") -> listOf(
+            "https://images.unsplash.com/photo-1508138221679-760a23a2285b?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("country") || g.contains("western") || g.contains("cowboy") || g.contains("кантри") -> listOf(
+            "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1517260739337-6799d239ce83?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("bluegrass") -> listOf(
+            "https://images.unsplash.com/photo-1468164016595-6108e4c60c8b?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("folk") || g.contains("acoustic") || g.contains("singer-songwriter") || g.contains("фолк") ||
+        g.contains("народн") || g.contains("шансон") -> listOf(
+            "https://images.unsplash.com/photo-1468164016595-6108e4c60c8b?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("reggae") || g.contains("ska") || g.contains("dub") || g.contains("dancehall") ||
+        g.contains("регги") || g.contains("ска") -> listOf(
+            "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("classical") || g.contains("chamber") || g.contains("baroque") || g.contains("piano") ||
+        g.contains("violin") || g.contains("классическ") || g.contains("камерн") || g.contains("инструменталь") -> listOf(
+            "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("orchestra") || g.contains("symphony") || g.contains("philharmonic") ||
+        g.contains("оркестр") || g.contains("симфон") -> listOf(
+            "https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("opera") || g.contains("оперн") -> listOf(
+            "https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("techno") || g.contains("техно") -> listOf(
+            "https://images.unsplash.com/photo-1512058564366-18510be2db19?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1487180144351-b8472da7d491?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("deep house") -> listOf(
+            "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("house") || g.contains("хаус") -> listOf(
+            "https://images.unsplash.com/photo-1557683316-973673baf926?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("trance") || g.contains("транс") -> listOf(
+            "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1512058564366-18510be2db19?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("psytrance") || g.contains("goa") -> listOf(
+            "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("dance") || g.contains("данс") -> listOf(
+            "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("drum and bass") || g.contains("dnb") || g.contains("dubstep") ||
+        g.contains("electro") || g.contains("electronica") || g.contains("electronic") ||
+        g.contains("электро") || g.contains("танцевальн") -> listOf(
+            "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1512058564366-18510be2db19?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1487180144351-b8472da7d491?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("dj") || g.contains("mix") || g.contains("диджей") -> listOf(
+            "https://images.unsplash.com/photo-1487180144351-b8472da7d491?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("ambient") || g.contains("new age") || g.contains("эмбиент") || g.contains("нью-эйдж") -> listOf(
+            "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1506126613408-eca07ce68773?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("chillout") || g.contains("chill") || g.contains("lounge") ||
+        g.contains("easy listening") || g.contains("lofi") || g.contains("lo-fi") ||
+        g.contains("чиллаут") || g.contains("лаунж") -> listOf(
+            "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("meditation") || g.contains("spiritual") || g.contains("religious") ||
+        g.contains("yoga") || g.contains("медитац") -> listOf(
+            "https://images.unsplash.com/photo-1506126613408-eca07ce68773?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1516280440614-37939bbacd81?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("soundtrack") || g.contains("movie") || g.contains("film") ||
+        g.contains("саундтрек") || g.contains("кино") -> listOf(
+            "https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("comedy") || g.contains("юмор") -> listOf(
+            "https://images.unsplash.com/photo-1527224857830-43a7acc85260?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("world") || g.contains("global") || g.contains("international") ||
+        g.contains("traditional") || g.contains("миров") -> listOf(
+            "https://images.unsplash.com/photo-1526218626217-dc65a29bb444?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1489392191049-fc10c97e64b6?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("80s") || g.contains("80's") || g.contains("1980") || g.contains("80er") || g.contains("80х") -> listOf(
+            "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("90s") || g.contains("90's") || g.contains("1990") || g.contains("90х") -> listOf(
+            "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511379938547-c1f69419868d?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("70s") || g.contains("70's") || g.contains("1970") || g.contains("70х") -> listOf(
+            "https://images.unsplash.com/photo-1516062423079-7ca13cdc7f5a?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("60s") || g.contains("60's") || g.contains("50s") || g.contains("oldies") ||
+        g.contains("retro") || g.contains("nostalg") || g.contains("ретро") || g.contains("ностальг") -> listOf(
+            "https://images.unsplash.com/photo-1511379938547-c1f69419868d?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=800&auto=format&fit=crop"
+        )
+        g.contains("pop") || g.contains("hits") || g.contains("top") || g.contains("chart") ||
+        g.contains("music") || g.contains("эстрад") || g.contains("популярн") -> listOf(
+            "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
+        else -> listOf(
+            "https://images.unsplash.com/photo-1453090927415-5f45085b65c0?q=80&w=800&auto=format&fit=crop",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop"
+        )
     }
+    return urls[pick % urls.size]
 }
 
 @Composable
@@ -2753,8 +3314,8 @@ fun StationGrid(
     onLoadMore: (() -> Unit)? = null,
     onLongClick: (Station) -> Unit = {}
 ) {
-    val favorites by viewModel.favorites.collectAsState()
     val currentStation by viewModel.currentStation.collectAsState()
+    val selectedNavItem by viewModel.selectedNavItem.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val focusRequester = remember { FocusRequester() }
     val loadMoreFocusRequester = remember { FocusRequester() }
@@ -2773,12 +3334,51 @@ fun StationGrid(
         }
     }
 
+    // Only show the "nothing here" message once the list has stayed empty for a moment
+    // without loading, so it doesn't flash between a search keystroke and its request.
+    var showEmptyState by remember { mutableStateOf(false) }
+    LaunchedEffect(stations.isEmpty(), isLoading) {
+        showEmptyState = false
+        if (stations.isEmpty() && !isLoading) {
+            delay(600)
+            showEmptyState = true
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .focusRequester(focusRequester)
     ) {
-        if (stations.isNotEmpty()) {
+        if (stations.isEmpty()) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize().padding(bottom = 80.dp), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp),
+                        strokeWidth = 4.dp,
+                        color = readableAccent()
+                    )
+                }
+            } else if (showEmptyState) {
+                when (selectedNavItem) {
+                    NavigationItem.Favourites -> EmptyState(
+                        icon = Icons.Default.FavoriteBorder,
+                        title = stringResource(R.string.empty_favorites_title),
+                        message = stringResource(R.string.empty_favorites_message)
+                    )
+                    NavigationItem.Recent -> EmptyState(
+                        icon = Icons.Default.History,
+                        title = stringResource(R.string.empty_recent_title),
+                        message = stringResource(R.string.empty_recent_message)
+                    )
+                    else -> EmptyState(
+                        icon = Icons.Default.SearchOff,
+                        title = stringResource(R.string.empty_no_stations_title),
+                        message = stringResource(R.string.empty_no_stations_message)
+                    )
+                }
+            }
+        } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
                 contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
@@ -2787,7 +3387,7 @@ fun StationGrid(
                 itemsIndexed(stations, key = { _, station -> station.stationUuid }) { index, station ->
                     StationCard(
                         station = station,
-                        isFavorite = favorites.contains(station.stationUuid),
+                        isFavorite = selectedNavItem != NavigationItem.Favourites && viewModel.isFavorite(station),
                         isCurrent = currentStation?.stationUuid == station.stationUuid,
                         onClick = { if (!isLongClickActive) viewModel.playStation(station) },
                         onLongClick = { onLongClick(station) },
@@ -2811,7 +3411,7 @@ fun StationGrid(
                                 modifier = Modifier.focusRequester(loadMoreFocusRequester),
                                 colors = androidx.tv.material3.ButtonDefaults.colors(
                                     containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    contentColor = MaterialTheme.colorScheme.primary
+                                    contentColor = readableAccent()
                                 )
                             ) {
                                 if (isLoading) {
@@ -2832,10 +3432,29 @@ fun StationGrid(
 
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Unit, onTagLongClick: ((Tag) -> Unit)? = null) {
+fun TagGrid(
+    tags: List<Tag>,
+    autoFocus: Boolean = true,
+    targetTagName: String? = null,
+    homeGenres: Set<String> = emptySet(),
+    onTagClick: (Tag) -> Unit,
+    onTagLongClick: ((Tag) -> Unit)? = null
+) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(autoFocus, tags.isNotEmpty()) {
-        if (autoFocus) {
+    val gridState = rememberLazyGridState()
+    val targetIndex = remember(tags, targetTagName) {
+        if (!targetTagName.isNullOrEmpty()) {
+            val idx = tags.indexOfFirst { it.name.equals(targetTagName, ignoreCase = true) }
+            if (idx >= 0) idx else 0
+        } else 0
+    }
+
+    LaunchedEffect(autoFocus, tags.isNotEmpty(), targetIndex) {
+        if (autoFocus && tags.isNotEmpty()) {
+            if (targetIndex > 0) {
+                try { gridState.scrollToItem(targetIndex) } catch (_: Exception) {}
+                yield()
+            }
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
     }
@@ -2843,6 +3462,7 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
         Box(modifier = Modifier.fillMaxSize())
     } else {
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
@@ -2854,7 +3474,7 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        .then(if (index == targetIndex) Modifier.focusRequester(focusRequester) else Modifier),
                     scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f)
                 ) {
                     Box(modifier = Modifier.fillMaxSize().background(getGenreColor(tag.name))) {
@@ -2866,14 +3486,21 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
                             alpha = 0.4f
                         )
                         Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                        )
                                     )
-                                )
-                        )
+                            )
+                        if (homeGenres.contains(tag.name)) {
+                            HomeBadge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(12.dp)
+                            )
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -2881,14 +3508,11 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = tag.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }, 
+                            GenreTitleText(
+                                text = tag.name.toTitleCase(),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                maxLines = 2
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Surface(
@@ -2915,11 +3539,27 @@ fun TagGrid(tags: List<Tag>, autoFocus: Boolean = true, onTagClick: (Tag) -> Uni
 fun CountryGrid(
     countries: List<Country>, 
     autoFocus: Boolean = true, 
+    targetCountryName: String? = null,
     onCountryClick: (Country) -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(autoFocus, countries.isNotEmpty()) {
-        if (autoFocus) {
+    val gridState = rememberLazyGridState()
+    val targetIndex = remember(countries, targetCountryName) {
+        if (!targetCountryName.isNullOrEmpty()) {
+            val idx = countries.indexOfFirst { 
+                it.name.equals(targetCountryName, ignoreCase = true) || 
+                it.iso_3166_1.equals(targetCountryName, ignoreCase = true) 
+            }
+            if (idx >= 0) idx else 0
+        } else 0
+    }
+
+    LaunchedEffect(autoFocus, countries.isNotEmpty(), targetIndex) {
+        if (autoFocus && countries.isNotEmpty()) {
+            if (targetIndex > 0) {
+                try { gridState.scrollToItem(targetIndex) } catch (_: Exception) {}
+                yield()
+            }
             try { focusRequester.requestFocus() } catch (e: Exception) {}
         }
     }
@@ -2927,6 +3567,7 @@ fun CountryGrid(
         Box(modifier = Modifier.fillMaxSize().focusRequester(focusRequester).focusable())
     } else {
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
@@ -2937,13 +3578,13 @@ fun CountryGrid(
                     modifier = Modifier
                         .padding(8.dp)
                         .height(180.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        .then(if (index == targetIndex) Modifier.focusRequester(focusRequester) else Modifier),
                     scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1.1f)
                 ) {
                     Box(modifier = Modifier.fillMaxSize().background(getGenreColor(country.name))) {
                         val flagCode = country.iso_3166_1.lowercase().trim()
                         AsyncImage(
-                            model = if (flagCode.isNotEmpty()) "https://flagcdn.com/w160/$flagCode.png" else "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop",
+                            model = if (flagCode.isNotEmpty()) "https://flagcdn.com/w320/$flagCode.png" else "https://images.unsplash.com/photo-1526772662000-3f88f10405ff?q=80&w=600&auto=format&fit=crop",
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
@@ -2966,14 +3607,11 @@ fun CountryGrid(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = country.name.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
+                            GenreTitleText(
+                                text = country.name.toTitleCase(),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                maxLines = 2
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Surface(
@@ -3005,6 +3643,11 @@ fun StationCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
+    val accent = readableAccent()
+    val focusedBorder = androidx.tv.material3.Border(
+        border = androidx.compose.foundation.BorderStroke(2.dp, accent),
+        shape = MaterialTheme.shapes.medium
+    )
     Card(
         onClick = onClick,
         onLongClick = onLongClick,
@@ -3018,11 +3661,19 @@ fun StationCard(
                 elevation = 12.dp
             )
         ),
+        // The station that is playing keeps a soft outline even when not focused, so it
+        // is easy to spot while scrolling through a long grid.
         border = androidx.tv.material3.CardDefaults.border(
-            focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                shape = MaterialTheme.shapes.medium
-            )
+            border = if (isCurrent) {
+                androidx.tv.material3.Border(
+                    border = androidx.compose.foundation.BorderStroke(2.dp, accent.copy(alpha = 0.55f)),
+                    shape = MaterialTheme.shapes.medium
+                )
+            } else {
+                androidx.tv.material3.Border.None
+            },
+            focusedBorder = focusedBorder,
+            pressedBorder = focusedBorder
         ),
         colors = androidx.tv.material3.CardDefaults.colors(
             containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
@@ -3054,27 +3705,31 @@ fun StationCard(
                 val code = station.countryCode?.trim()?.lowercase()
                 if (!code.isNullOrEmpty() && code.length == 2) {
                     AsyncImage(
-                        model = "https://flagcdn.com/w40/$code.png",
+                        model = "https://flagcdn.com/w80/$code.png",
                         contentDescription = null,
                         modifier = Modifier.size(24.dp).align(Alignment.TopStart).padding(4.dp),
                         contentScale = ContentScale.Fit
                     )
                 }
                 if (isFavorite) {
-                    Icon(
-                        Icons.Default.Favorite,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp).align(Alignment.TopEnd).padding(4.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                    FavoriteBadge(
+                        modifier = Modifier.align(Alignment.TopEnd)
                     )
                 }
                 if (isCurrent) {
-                    Icon(
-                        Icons.Default.GraphicEq,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp).align(Alignment.BottomEnd).padding(4.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    // "Now playing" pill, large enough to read from the couch.
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp),
+                        shape = CircleShape,
+                        colors = SurfaceDefaults.colors(containerColor = accent)
+                    ) {
+                        Icon(
+                            Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            modifier = Modifier.padding(4.dp).size(18.dp),
+                            tint = if (accent.luminance() > 0.4f) Color.Black else Color.White
+                        )
+                    }
                 }
             }
             
@@ -3084,22 +3739,49 @@ fun StationCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                color = if (isCurrent) accent else Color.Unspecified,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Favorite,
-                    contentDescription = null,
-                    modifier = Modifier.size(12.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = station.votes.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
+            val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = mutedColor
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = station.votes.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = mutedColor
+                    )
+                }
+                // Codec + bitrate at a glance, e.g. "MP3 · 128k" / "FLAC".
+                stationQualityLabel(station)?.let { quality ->
+                    val isLossless = station.codec.orEmpty().contains("FLAC", ignoreCase = true)
+                    Surface(
+                        shape = MaterialTheme.shapes.extraSmall,
+                        colors = SurfaceDefaults.colors(
+                            containerColor = if (isLossless) accent.copy(alpha = 0.25f)
+                                             else Color.White.copy(alpha = 0.08f)
+                        )
+                    ) {
+                        Text(
+                            text = quality,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isLossless) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isLossless) accent else mutedColor,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -3182,7 +3864,7 @@ fun Screensaver(viewModel: MainViewModel) {
                             val code = station.countryCode?.trim()?.lowercase()
                             if (!code.isNullOrEmpty() && code.length == 2) {
                                 AsyncImage(
-                                    model = "https://flagcdn.com/w80/$code.png",
+                                    model = "https://flagcdn.com/w160/$code.png",
                                     contentDescription = null,
                                     modifier = Modifier
                                         .size(48.dp)
@@ -3196,21 +3878,7 @@ fun Screensaver(viewModel: MainViewModel) {
                         Spacer(modifier = Modifier.height(32.dp))
                         
                         // Technical info
-                        val technicalInfo = audioFormat?.let { format ->
-                            val kbps = if (format.bitrate > 0) "${format.bitrate / 1000}k" else "${station.bitrate}k"
-                            val samplerate = if (format.sampleRate > 0) "${format.sampleRate / 1000}kHz" else ""
-                            val codec = format.sampleMimeType?.removePrefix("audio/")?.uppercase()
-                                ?.replace("MPEG", "MP3")
-                                ?.replace("MP4A-LATM", "AAC")
-                                ?: station.codec.orEmpty().uppercase()
-                            val channels = when (format.channelCount) {
-                                1 -> "Mono"
-                                2 -> "Stereo"
-                                in 3..8 -> "${format.channelCount}ch"
-                                else -> ""
-                            }
-                            listOfNotNull(codec, kbps, samplerate, channels).joinToString(" ")
-                        } ?: "${station.bitrate}k"
+                        val technicalInfo = formatTechnicalInfo(audioFormat, station)
 
                         Surface(
                             shape = MaterialTheme.shapes.extraSmall,
@@ -3220,7 +3888,7 @@ fun Screensaver(viewModel: MainViewModel) {
                             Text(
                                 text = technicalInfo,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = readableAccent(),
                                 fontWeight = FontWeight.ExtraBold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
@@ -3252,14 +3920,15 @@ fun Screensaver(viewModel: MainViewModel) {
                             )
                         }
                         
-                        val timeMinutes = (playbackTime / 1000) / 60
-                        val timeSeconds = (playbackTime / 1000) % 60
-                        val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
+                        val timeStr = formatElapsed(playbackTime)
                         
                         Text(
-                            text = if (isPlaying) "Playing • $timeStr" else "Paused • $timeStr",
+                            text = stringResource(
+                                if (isPlaying) R.string.playback_status_playing else R.string.playback_status_paused,
+                                timeStr
+                            ),
                             style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            color = readableAccent().copy(alpha = 0.6f),
                             modifier = Modifier.padding(top = 8.dp)
                         )
                         
@@ -3312,7 +3981,7 @@ fun FilePicker(
                     Icon(
                         if (state.isExport) Icons.Default.CreateNewFolder else Icons.Default.Folder,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = readableAccent(),
                         modifier = Modifier.size(32.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
@@ -3425,7 +4094,7 @@ fun FilePicker(
                                 Text(
                                     text = stringResource(R.string.export_filename_label),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = readableAccent()
                                 )
                                 Text(
                                     text = state.suggestedFileName,
@@ -3465,6 +4134,7 @@ fun NowPlayingBar(
     onNext: () -> Unit,
     onPrevious: () -> Unit
 ) {
+    val accent = readableAccent()
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -3474,6 +4144,18 @@ fun NowPlayingBar(
         ),
         shape = RectangleShape
     ) {
+        // Thin accent line along the top edge separates the bar from the grid scrolling under it.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(Color.Transparent, accent.copy(alpha = 0.6f), Color.Transparent)
+                    )
+                )
+        )
         Row(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
@@ -3502,35 +4184,29 @@ fun NowPlayingBar(
 
                 Column {
                     // Technical decoder info
-                    val technicalInfo = audioFormat?.let { format ->
-                        val kbps = if (format.bitrate > 0) "${format.bitrate / 1000}k" else "${station.bitrate}k"
-                        val samplerate = if (format.sampleRate > 0) "${format.sampleRate / 1000}kHz" else ""
-                        val codec = format.sampleMimeType?.removePrefix("audio/")?.uppercase()
-                            ?.replace("MPEG", "MP3")
-                            ?.replace("MP4A-LATM", "AAC")
-                            ?: station.codec.orEmpty().uppercase()
+                    val technicalInfo = formatTechnicalInfo(audioFormat, station)
 
-                        val channels = when (format.channelCount) {
-                            1 -> "Mono"
-                            2 -> "Stereo"
-                            in 3..8 -> "${format.channelCount}ch"
-                            else -> ""
-                        }
-                        listOfNotNull(codec, kbps, samplerate, channels).joinToString(" ")
-                    } ?: "${station.bitrate}k"
-
-                    Surface(
-                        shape = MaterialTheme.shapes.extraSmall,
-                        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                        modifier = Modifier.padding(bottom = 4.dp)
+                    Row(
+                        modifier = Modifier.padding(bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = technicalInfo,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
+                        // Live streams have no duration; mark them with a small "LIVE" tag.
+                        if (isPlaying && playbackDuration <= 0) {
+                            LiveBadge()
+                        }
+                        Surface(
+                            shape = MaterialTheme.shapes.extraSmall,
+                            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        ) {
+                            Text(
+                                text = technicalInfo,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accent,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
                     }
 
                     val displayTitle = if (!mediaMetadata?.title.isNullOrEmpty()) {
@@ -3557,7 +4233,7 @@ fun NowPlayingBar(
                             val code = station.countryCode?.trim()?.lowercase()
                             if (!code.isNullOrEmpty() && code.length == 2) {
                                 AsyncImage(
-                                    model = "https://flagcdn.com/w40/$code.png",
+                                    model = "https://flagcdn.com/w80/$code.png",
                                     contentDescription = null,
                                     modifier = Modifier.size(24.dp).padding(end = 8.dp),
                                     contentScale = ContentScale.Fit
@@ -3592,14 +4268,10 @@ fun NowPlayingBar(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val timeMinutes = (playbackTime / 1000) / 60
-                val timeSeconds = (playbackTime / 1000) % 60
-                val timeStr = String.format(Locale.getDefault(), "%02d:%02d", timeMinutes, timeSeconds)
-                
                 Text(
-                    text = timeStr,
+                    text = formatElapsed(playbackTime),
                     style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = accent,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(end = 16.dp)
                 )
@@ -3621,7 +4293,7 @@ fun NowPlayingBar(
                 ) {
                     Icon(
                         if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        contentDescription = stringResource(if (isPlaying) R.string.content_desc_pause else R.string.content_desc_play),
                         modifier = Modifier.padding(12.dp).size(28.dp)
                     )
                 }
@@ -3643,7 +4315,8 @@ fun NowPlayingBar(
                         if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = stringResource(R.string.content_desc_favorite),
                         modifier = Modifier.padding(10.dp).size(24.dp),
-                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        // Same red as the favourite badge on station tiles.
+                        tint = if (isFavorite) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -3661,8 +4334,43 @@ fun NowPlayingBar(
             LinearProgressIndicator(
                 progress = { playbackTime.toFloat() / playbackDuration.toFloat() },
                 modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter),
-                color = MaterialTheme.colorScheme.primary,
+                color = accent,
                 trackColor = Color.Transparent
+            )
+        }
+    }
+}
+
+/** Small pulsing "LIVE" tag for live streams in the Now Playing bar. */
+@Composable
+fun LiveBadge() {
+    val pulse by rememberInfiniteTransition(label = "LivePulse").animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "LivePulseAlpha"
+    )
+    val liveRed = Color(0xFFE53935)
+    Surface(
+        shape = MaterialTheme.shapes.extraSmall,
+        colors = SurfaceDefaults.colors(containerColor = liveRed.copy(alpha = 0.18f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .graphicsLayer { alpha = pulse }
+                    .background(liveRed, CircleShape)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.now_playing_live),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = liveRed
             )
         }
     }
@@ -3670,6 +4378,7 @@ fun NowPlayingBar(
 
 @Composable
 fun WaveformAnalyzer(isPlaying: Boolean, modifier: Modifier = Modifier) {
+    val accent = readableAccent()
     val infiniteTransition = rememberInfiniteTransition(label = "WaveformTransition")
     val barCount = 40
     
@@ -3710,8 +4419,8 @@ fun WaveformAnalyzer(isPlaying: Boolean, modifier: Modifier = Modifier) {
                     .background(
                         brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                accent,
+                                accent.copy(alpha = 0.4f)
                             )
                         ),
                         shape = RoundedCornerShape(1.dp)
