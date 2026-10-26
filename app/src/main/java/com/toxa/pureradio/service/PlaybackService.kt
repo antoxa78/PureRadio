@@ -1,8 +1,6 @@
 package com.toxa.pureradio.service
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Binder
@@ -20,7 +18,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import com.toxa.pureradio.R
+import com.toxa.pureradio.MainActivity
 
 /**
  * Hosts the [ExoPlayer] and [MediaSession] as a proper foreground service so that
@@ -31,9 +29,17 @@ import com.toxa.pureradio.R
  * The app's own UI (MainViewModel) binds to this service directly (see [LocalBinder])
  * to get a raw [ExoPlayer] reference — everything in the ViewModel that used to call
  * into a self-owned ExoPlayer keeps working unchanged, it just talks to the player
- * living here instead. [onGetSession] is what lets Media3's MediaSessionService
- * machinery observe playback state and automatically move this service in and out
- * of the foreground with a system-managed notification.
+ * living here instead.
+ *
+ * The session is registered with [addSession] as soon as it is built. Media3 only manages
+ * the media notification and the foreground state for sessions that have been added; it
+ * does that by itself when a MediaController connects through the standard service
+ * interface, but our UI binds with a private action ([ACTION_LOCAL_BIND]) and never
+ * connects a controller, so without the explicit call the session was never added — no
+ * media notification / lock-screen controls were shown, and the service had to be forced
+ * into the foreground with a permanent "Connecting…" placeholder. With the session added,
+ * Media3 starts the service in the foreground (with its standard media notification) when
+ * playback starts and drops it out of the foreground when playback pauses or stops.
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -49,27 +55,11 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
         val prefs = getSharedPreferences("pure_radio_prefs", Context.MODE_PRIVATE)
         buildPlayer(
             extraBuffering = prefs.getBoolean("extra_buffering", false),
             audioPassthrough = prefs.getBoolean("audio_passthrough", false)
         )
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // playStation() starts us with startForegroundService(), which requires
-        // startForeground() within the system's timeout. Media3 only promotes the
-        // service to foreground once playback is genuinely active, so a slow or
-        // failing radio stream could leave us outside that window and crash the app.
-        // Calling startForeground() here immediately satisfies the requirement;
-        // Media3 then updates the notification with playback controls once the
-        // session is active.
-        startForeground(
-            NOTIFICATION_ID,
-            placeholderNotification(intent?.getStringExtra(EXTRA_STATION_NAME))
-        )
-        return super.onStartCommand(intent, flags, startId)
     }
 
     /** Current player, or null if the service hasn't finished creating one yet. */
@@ -125,9 +115,14 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
 
+        // "High-Resolution Output" setting (stored under the old "audio_passthrough" key).
+        // Float output makes the platform decoders hand over 32-bit float PCM, so 24-bit
+        // sources such as hi-res FLAC aren't truncated to 16-bit. It is NOT bit-perfect:
+        // Android still mixes/resamples to the device rate. (The previous version also set
+        // EXTENSION_RENDERER_MODE_PREFER, which did nothing because no Media3 decoder
+        // extensions are bundled with the app.)
         if (audioPassthrough) {
             val renderersFactory = DefaultRenderersFactory(this)
-                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
                 .setEnableAudioFloatOutput(true)
             builder.setRenderersFactory(renderersFactory)
         }
@@ -139,6 +134,14 @@ class PlaybackService : MediaSessionService() {
         val newPlayer = builder.build().apply {
             // Force 1.0 speed and pitch to ensure no resampling for time-stretching
             playbackParameters = PlaybackParameters.DEFAULT
+            // "Best Stream Quality": adaptive (HLS) stations often offer the same programme at
+            // several bitrates (e.g. 48 / 96 / 320 kbps) and ExoPlayer would otherwise start
+            // low and climb slowly. Radio bitrates are small, so always take the top one.
+            val bestStream = getSharedPreferences("pure_radio_prefs", Context.MODE_PRIVATE)
+                .getBoolean(PREF_BEST_STREAM, true)
+            trackSelectionParameters = trackSelectionParameters.buildUpon()
+                .setForceHighestSupportedBitrate(bestStream)
+                .build()
         }
 
         if (previousItem != null) {
@@ -152,7 +155,13 @@ class PlaybackService : MediaSessionService() {
         if (session != null) {
             session.player = newPlayer
         } else {
-            mediaSession = MediaSession.Builder(this, newPlayer).build()
+            val newSession = MediaSession.Builder(this, newPlayer)
+                .setSessionActivity(openAppIntent())
+                .build()
+            mediaSession = newSession
+            // See the class comment: this is what makes Media3 show the media notification
+            // and manage the foreground state for our session.
+            addSession(newSession)
         }
 
         previousPlayer?.release()
@@ -185,31 +194,18 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.playback_channel_name),
-            NotificationManager.IMPORTANCE_LOW
+    /** Tapping the media notification brings the app back to the front. */
+    private fun openAppIntent(): PendingIntent =
+        PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
-    }
-
-    private fun placeholderNotification(stationName: String?): Notification {
-        @Suppress("DEPRECATION")
-        return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle(stationName ?: getString(R.string.playback_notification_placeholder))
-            .setContentText(getString(R.string.playback_notification_connecting))
-            .setSmallIcon(applicationInfo.icon)
-            .setPriority(Notification.PRIORITY_LOW)
-            .setOngoing(true)
-            .build()
-    }
 
     companion object {
         const val ACTION_LOCAL_BIND = "com.toxa.pureradio.action.LOCAL_BIND"
-        const val EXTRA_STATION_NAME = "com.toxa.pureradio.extra.STATION_NAME"
-        private const val CHANNEL_ID = "playback"
-        private const val NOTIFICATION_ID = 1001
+        const val PREF_BEST_STREAM = "best_stream"
     }
 }

@@ -8,9 +8,16 @@ interface RadioBrowserService {
     @GET("json/stations/search")
     suspend fun searchStations(
         @Query("name") name: String? = null,
+        @Query("nameExact") nameExact: Boolean = false,
         @Query("country") country: String? = null,
         @Query("language") language: String? = null,
         @Query("tag") tag: String? = null,
+        // radio-browser matches `country` and `tag` as substrings unless the *Exact flag is
+        // set ("Niger" would also return Nigeria). `countrycode` is the ISO 3166-1 code and
+        // is the field radio-browser recommends for country filtering.
+        @Query("countrycode") countryCode: String? = null,
+        @Query("countryExact") countryExact: Boolean = false,
+        @Query("tagExact") tagExact: Boolean = false,
         @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
         @Query("order") order: String = "votes",

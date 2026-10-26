@@ -13,5 +13,8 @@ data class Station(
     @SerializedName("language") val language: String,
     @SerializedName("votes") val votes: Int,
     @SerializedName("codec") val codec: String? = "",
-    @SerializedName("bitrate") val bitrate: Int
+    @SerializedName("bitrate") val bitrate: Int,
+    // Used to recognise other streams of the same station (see MainViewModel.findBetterStream).
+    // Nullable with a default: stations saved before this field existed have no value.
+    @SerializedName("homepage") val homepage: String? = null
 )

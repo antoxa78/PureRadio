@@ -20,7 +20,7 @@
     <string name="settings_auto_reconnect">Автоперепідключення</string>
     <string name="settings_extra_buffering">Додаткова буферизація</string>
     <string name="settings_ambient_screensaver">Заставка та фон</string>
-    <string name="settings_audio_passthrough">Наскрізна передача звуку (Bit-Perfect)</string>
+    <string name="settings_audio_passthrough">Звук високої роздільної здатності</string>
     <string name="settings_smart_filter">Смарт-фільтр</string>
     <string name="settings_min_tag_count">Мін. к-сть станцій у тегу</string>
     <string name="settings_bg_sync">Фонова синхронізація</string>
@@ -47,7 +47,7 @@
     <string name="settings_extra_buffering_desc">Збільшити розмір буфера (збільшує час запуску)</string>
     <string name="settings_ambient_screensaver_desc_enabled">Увімкнено (%1$d хв)</string>
     <string name="settings_ambient_screensaver_desc_disabled">Вимкнено</string>
-    <string name="settings_audio_passthrough_desc">Експериментально: обхід ресемплера Android. Потрібне увімкнення в налаштуваннях Shield.</string>
+    <string name="settings_audio_passthrough_desc">Передає звук до Android у 32-бітному форматі з рухомою комою, тож 24-бітні потоки (hi-res FLAC) не урізаються до 16 біт. Android і далі мікшує звук з частотою пристрою, тому це не bit-perfect.</string>
     <string name="settings_smart_filter_desc">Приховувати станції з проблемами з\'єднання</string>
     <string name="settings_min_tag_count_desc">Не завантажувати теги з менш ніж 101 станцією</string>
     <string name="settings_bg_sync_desc_12">12 годин</string>
@@ -154,9 +154,6 @@
     <string name="go_to_parent_directory">Перейти до батьківської папки</string>
     <string name="file_type_folder">Папка</string>
     <string name="export_filename_label">Ім\'я файлу експорту:</string>
-    <string name="playback_channel_name">Відтворення</string>
-    <string name="playback_notification_placeholder">Pure Radio</string>
-    <string name="playback_notification_connecting">Підключення до станції…</string>
 
     <!-- UI refresh: empty states, settings sections, player bar -->
     <string name="settings_section_general">ЗАГАЛЬНІ</string>
@@ -178,4 +175,9 @@
     <string name="content_desc_play">Відтворити</string>
     <string name="content_desc_pause">Пауза</string>
     <string name="content_desc_clear">Очистити</string>
+
+    <!-- Stream quality -->
+    <string name="settings_best_stream">Найкраща якість потоку</string>
+    <string name="settings_best_stream_desc">Відтворювати версію станції з найкращою якістю, якщо вона має кілька потоків, і максимальний бітрейт адаптивних (HLS) потоків</string>
+    <string name="stream_upgraded_notice">Відтворюється потік цієї станції кращої якості: %1$s</string>
 </resources>

@@ -14,7 +14,10 @@ import android.app.Activity
 import android.content.IntentFilter
 import android.util.Rational
 import android.content.res.Configuration
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -171,13 +174,20 @@ import com.toxa.pureradio.ui.viewmodel.GenreGroup
 import com.toxa.pureradio.ui.viewmodel.MainViewModel
 import com.toxa.pureradio.ui.viewmodel.NavigationItem
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Extends [AppCompatActivity] (not plain ComponentActivity) because the in-app language
+ * switch uses AppCompatDelegate.setApplicationLocales(), which on Android 12L (API 32) and
+ * lower only takes effect for AppCompatActivity-based activities.
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val isInPipMode = mutableStateOf(false)
     // Shown at most once per process: reassures the user that leaving the app doesn't
@@ -216,6 +226,9 @@ class MainActivity : ComponentActivity() {
                 splashElapsed = true
             }
             val showSplash by remember { derivedStateOf { !isInitialized || !splashElapsed } }
+            // Without this, Back during the splash fell through to the system and closed the
+            // app with no confirmation (MainScreen's own Back handling isn't there yet).
+            BackHandler(enabled = showSplash && !isPip) { }
             val appTheme by viewModel.appTheme.collectAsState()
             PureRadioTheme(theme = appTheme) {
                 Surface(
@@ -257,6 +270,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // Keep the PiP parameters in sync with playback. On Android 12+ auto-enter must be
+        // configured BEFORE the user leaves the app (setting it in onUserLeaveHint is too
+        // late), and it must be switched off again when nothing is playing.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    viewModel.isPlaying,
+                    viewModel.currentStation,
+                    viewModel.mediaMetadata
+                ) { _, _, _ -> Unit }.collect { refreshPipParams() }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -266,79 +292,92 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        updatePipParams()
+        enterPipIfPlaying()
     }
 
-    private fun updatePipParams() {
-        if (viewModel.isPlaying.value) {
-            val station = viewModel.currentStation.value ?: return
+    private fun isPipSupported(): Boolean =
+        packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
-            // PiP genuinely isn't available on this device/config (older API, feature
-            // disabled by the OEM or the user, etc). Don't bother building params we
-            // know will fail — just reassure the user once that audio keeps playing
-            // via the notification instead of silently doing nothing.
-            if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
-                showPipFallbackNoticeOnce()
-                return
-            }
-            val metadata = viewModel.mediaMetadata.value
-            
-            val stopIntent = PendingIntent.getBroadcast(
-                this,
-                1,
-                Intent("ACTION_STOP_RADIO").setPackage(packageName),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            val stopAction = RemoteAction(
-                Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                "Close",
-                "Stop Radio",
-                stopIntent
-            )
-            
-            val openIntent = PendingIntent.getActivity(
-                this,
-                0,
-                Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE
-            )
-            val openAction = RemoteAction(
-                Icon.createWithResource(this, android.R.drawable.ic_menu_revert),
-                "Open",
-                "Open App",
-                openIntent
-            )
+    /** Builds PiP params for the current station; null when nothing is playing. */
+    private fun buildPipParams(): PictureInPictureParams? {
+        val station = viewModel.currentStation.value ?: return null
+        if (!viewModel.isPlaying.value) return null
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(239, 100))
 
-            val builder = PictureInPictureParams.Builder()
-                .setAspectRatio(Rational(239, 100))
-                .setActions(listOf(openAction, stopAction))
-            
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            // Only ever enabled while something is playing (see refreshPipParams).
+            builder.setAutoEnterEnabled(true)
+        }
+
+        val metadata = viewModel.mediaMetadata.value
+        val stopIntent = PendingIntent.getBroadcast(
+            this,
+            1,
+            Intent("ACTION_STOP_RADIO").setPackage(packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val stopAction = RemoteAction(
+            Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+            "Close",
+            "Stop Radio",
+            stopIntent
+        )
+        val openIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        val openAction = RemoteAction(
+            Icon.createWithResource(this, android.R.drawable.ic_menu_revert),
+            "Open",
+            "Open App",
+            openIntent
+        )
+        builder.setActions(listOf(openAction, stopAction))
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val title = if (!metadata?.title.isNullOrEmpty()) metadata?.title.toString() else station.name
+            builder.setTitle(title)
+            builder.setSubtitle(station.name)
+        }
+        return builder.build()
+    }
+
+    /** Pushes the current params to the system (updates auto-enter and the PiP title). */
+    private fun refreshPipParams() {
+        if (!isPipSupported()) return
+        val params = buildPipParams() ?: run {
+            // Not playing: make sure auto-enter is switched off.
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                builder.setAutoEnterEnabled(true)
+                try {
+                    setPictureInPictureParams(
+                        PictureInPictureParams.Builder().setAutoEnterEnabled(false).build()
+                    )
+                } catch (_: Exception) {}
             }
-            
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                val title = if (!metadata?.title.isNullOrEmpty()) metadata?.title.toString() else station.name
-                builder.setTitle(title)
-                builder.setSubtitle(station.name)
-            }
+            return
+        }
+        try { setPictureInPictureParams(params) } catch (_: Exception) {}
+    }
 
-            val params = builder.build()
-            try {
-                setPictureInPictureParams(params)
-            } catch (e: Exception) {
-                // Fallback for older versions if setPictureInPictureParams fails
-                showPipFallbackNoticeOnce()
-            }
-
-            // For Android 14+ we call enterPictureInPictureMode manually if not auto-triggered
-            if (android.os.Build.VERSION.SDK_INT >= 34) {
-                 try {
-                     enterPictureInPictureMode(params)
-                 } catch (e: Exception) {
-                     showPipFallbackNoticeOnce()
-                 }
-            }
+    /**
+     * Called when the user presses Home. enterPictureInPictureMode() is required on
+     * Android 11 and lower (there is no auto-enter there) and harmless on newer versions,
+     * where auto-enter may already be doing the same thing.
+     */
+    private fun enterPipIfPlaying() {
+        if (!viewModel.isPlaying.value || viewModel.currentStation.value == null) return
+        if (!isPipSupported()) {
+            showPipFallbackNoticeOnce()
+            return
+        }
+        val params = buildPipParams() ?: return
+        try {
+            if (!enterPictureInPictureMode(params)) showPipFallbackNoticeOnce()
+        } catch (e: Exception) {
+            showPipFallbackNoticeOnce()
         }
     }
 
@@ -834,14 +873,34 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("*/*")
+        // A concrete type: some document providers refuse to create a file typed "*/*".
+        contract = ActivityResultContracts.CreateDocument("audio/x-mpegurl")
     ) { uri: Uri? ->
         uri?.let { viewModel.exportFavoritesToM3u(it) }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestMultiplePermissions()
     ) { }
+
+    // Storage permissions are only needed by the built-in file browser, which is the fallback
+    // when the device has no system file picker. On Android 9/10 writing a backup needs
+    // WRITE_EXTERNAL_STORAGE as well as READ (only READ used to be requested, so exports
+    // failed there). On Android 11+ the built-in browser can still create and read its own
+    // backups in Music/ without any permission; "All files access" is only requested when the
+    // user explicitly asks for it in Settings.
+    val legacyStoragePermissions = arrayOf(
+        android.Manifest.permission.READ_EXTERNAL_STORAGE,
+        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+    )
+    fun requestLegacyStoragePermissionsIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            val missing = legacyStoragePermissions.filter {
+                androidx.core.content.ContextCompat.checkSelfPermission(context, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -859,29 +918,8 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            if (!android.os.Environment.isExternalStorageManager()) {
-                try {
-                    val intent = Intent(
-                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:${context.packageName}")
-                    )
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    try {
-                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                        context.startActivity(intent)
-                    } catch (e2: Exception) {}
-                }
-            }
-        } else {
-            val permission = android.Manifest.permission.READ_EXTERNAL_STORAGE
-            if (androidx.core.content.ContextCompat.checkSelfPermission(context, permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(permission)
-            }
-        }
-    }
+    // (No storage-permission prompt at start-up any more: it used to send the user to the
+    // system "All files access" screen on every launch and on every return from PiP.)
 
     LaunchedEffect(error) {
         if (error != null) {
@@ -910,33 +948,51 @@ fun MainScreen(viewModel: MainViewModel) {
     val cancelFocusRequester = remember { FocusRequester() }
 
     val isDrawerOpen = drawerState.currentValue == DrawerValue.Open
-    val drawerOpenedIntentionally = remember { mutableStateOf(false) }
-    BackHandler {
-        if (isDrawerOpen) {
-            drawerState.setValue(DrawerValue.Closed)
-        } else {
-            when {
-                error != null -> viewModel.cancelRetry()
-                pendingImportStations != null -> viewModel.cancelRestore()
-                pendingOverwriteFile != null -> viewModel.cancelOverwrite()
-                filePickerState != null -> viewModel.closeFilePicker()
-                settingsSubMenu != null -> viewModel.setSettingsSubMenu(null)
-                selectedTag != null -> viewModel.selectTag(null)
-                selectedCountry != null -> viewModel.selectCountry(null)
-                selectedSearchTag != null -> viewModel.selectSearchTag(null)
-                selectedNavItem == NavigationItem.Search && (searchQuery.isNotEmpty() || stations.isNotEmpty()) -> viewModel.clearSearch()
-                isInitialized -> {
-                    drawerOpenedIntentionally.value = true
-                    drawerState.setValue(DrawerValue.Open)
-                    try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
-                }
-            }
-        }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    // Opens the main menu and puts focus on the current section's entry. Bumping the counter
+    // (instead of requesting focus directly) lets the drawer recompose first: its entries are
+    // only focusable while it is open, so an immediate requestFocus() silently failed and
+    // focus could stay in the content behind the menu.
+    var menuFocusRequest by remember { mutableIntStateOf(0) }
+    fun focusMainMenu() {
+        drawerState.setValue(DrawerValue.Open)
+        menuFocusRequest++
+    }
+    LaunchedEffect(menuFocusRequest) {
+        if (menuFocusRequest == 0) return@LaunchedEffect
+        // Two frames: the first one recomposes the opened drawer, the second lays it out.
+        withFrameNanos { }
+        withFrameNanos { }
+        try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
     }
 
-    LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Open) {
-            try { drawerFocusRequesters[selectedNavItem]?.requestFocus() } catch (_: Exception) {}
+    fun exitApp() {
+        viewModel.stopPlayback()
+        (context as? Activity)?.finish()
+    }
+
+    // Back navigation, from the innermost level outwards:
+    //   1. a reconnect countdown -> cancel it
+    //   2. sub-pages (settings sub-menu, opened genre/country, search tag, search text) -> one level up
+    //   3. main screen -> open the main menu and focus it
+    //   4. main menu already open -> ask whether to exit (or exit straight away when the
+    //      "Quit confirmation" setting is off)
+    // Dialogs (restore, overwrite, favourites, exit, file browser) handle Back themselves.
+    BackHandler(enabled = isInitialized) {
+        when {
+            isDrawerOpen -> {
+                if (quitConfirmationEnabled) showExitDialog = true else exitApp()
+            }
+            // Only an active reconnect countdown swallows Back. A plain error toast used to
+            // do so too, so Back seemed to do nothing for 5 s after any error message.
+            infoMessage != null -> viewModel.cancelRetry()
+            settingsSubMenu != null -> viewModel.setSettingsSubMenu(null)
+            selectedTag != null -> viewModel.selectTag(null)
+            selectedCountry != null -> viewModel.selectCountry(null)
+            selectedSearchTag != null -> viewModel.selectSearchTag(null)
+            selectedNavItem == NavigationItem.Search && (searchQuery.isNotEmpty() || stations.isNotEmpty()) -> viewModel.clearSearch()
+            else -> focusMainMenu()
         }
     }
 
@@ -958,27 +1014,15 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // Clear drawerOpenedIntentionally after one frame if drawer didn't consume it
-    LaunchedEffect(drawerOpenedIntentionally.value) {
-        if (drawerOpenedIntentionally.value) {
-            withFrameNanos { }
-            drawerOpenedIntentionally.value = false
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         NavigationDrawer(
             drawerState = drawerState,
             drawerContent = { drawerValue ->
                 val isDrawerCurrentlyOpen = drawerValue == DrawerValue.Open
+                // (The drawer itself opens/closes as focus enters/leaves it, so no extra
+                // onFocusChanged handling is needed here.)
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .onFocusChanged {
-                            if (!it.hasFocus && drawerValue == DrawerValue.Open) {
-                                drawerState.setValue(DrawerValue.Closed)
-                            }
-                        },
+                    modifier = Modifier.fillMaxHeight(),
                     contentPadding = PaddingValues(top = 16.dp, bottom = 140.dp, start = 4.dp, end = 4.dp)
                 ) {
                     items(NavigationItem.entries) { item ->
@@ -986,12 +1030,17 @@ fun MainScreen(viewModel: MainViewModel) {
                             selected = selectedNavItem == item,
                             onClick = { 
                                 if (item == NavigationItem.Exit) {
-                                    drawerState.setValue(DrawerValue.Closed)
-                                    if (quitConfirmationEnabled) {
-                                        showExitDialog = true
-                                    } else {
-                                        viewModel.stopPlayback()
-                                        (context as? Activity)?.finish()
+                                    // The menu stays open behind the dialog so "No" returns
+                                    // to it (closing it first left focus nowhere).
+                                    if (quitConfirmationEnabled) showExitDialog = true else exitApp()
+                                } else if (item == selectedNavItem && item != NavigationItem.Search) {
+                                    // Re-selecting the current section doesn't rebuild the
+                                    // screen, so nothing there would grab focus: hand focus
+                                    // back to the content explicitly (the drawer closes when
+                                    // focus leaves it).
+                                    viewModel.selectNavigationItem(item)
+                                    if (!focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Right)) {
+                                        drawerState.setValue(DrawerValue.Closed)
                                     }
                                 } else {
                                     viewModel.selectNavigationItem(item)
@@ -1010,7 +1059,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             ),
                             modifier = Modifier
                                 .focusProperties { canFocus = isDrawerCurrentlyOpen }
-                                .then(if (isDrawerCurrentlyOpen) Modifier.focusRequester(drawerFocusRequesters[item]!!) else Modifier),
+                                .focusRequester(drawerFocusRequesters.getValue(item)),
                             leadingContent = {
                                 val icon = when (item) {
                                     NavigationItem.Home -> Icons.Default.Home
@@ -1327,11 +1376,15 @@ fun MainScreen(viewModel: MainViewModel) {
                             NavigationItem.Settings -> {
                                 SettingsScreen(
                                     viewModel, 
+                                    // System file picker first (needs no permissions); the
+                                    // built-in browser is only the fallback for devices that
+                                    // don't have one (common on Android TV).
                                     onImportPlaylist = { 
                                         try {
                                             importLauncher.launch("*/*") 
                                         } catch (e: Exception) {
                                             viewModel.setError("System picker unavailable. Using Internal Explorer.")
+                                            requestLegacyStoragePermissionsIfNeeded()
                                             viewModel.openFilePicker(isExport = false)
                                         }
                                     },
@@ -1341,6 +1394,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                             exportLauncher.launch(fileName) 
                                         } catch (e: Exception) {
                                             viewModel.setError("System picker unavailable. Using Internal Explorer.")
+                                            requestLegacyStoragePermissionsIfNeeded()
                                             viewModel.openFilePicker(isExport = true, suggestedFileName = fileName)
                                         }
                                     },
@@ -1363,7 +1417,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                                 viewModel.setSuccess("All Files Access already granted")
                                             }
                                         } else {
-                                            permissionLauncher.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                                            permissionLauncher.launch(legacyStoragePermissions)
                                         }
                                     }
                                 )
@@ -1804,7 +1858,7 @@ fun MainScreen(viewModel: MainViewModel) {
     if (showExitDialog) {
         val exitYesFocusRequester = remember { FocusRequester() }
         val exitNoFocusRequester = remember { FocusRequester() }
-        Dialog(onDismissRequest = { showExitDialog = false }) {
+        Dialog(onDismissRequest = { showExitDialog = false; focusMainMenu() }) {
             Surface(
                 modifier = Modifier.width(420.dp),
                 shape = MaterialTheme.shapes.extraLarge,
@@ -1850,7 +1904,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Button(
-                            onClick = { showExitDialog = false },
+                            onClick = { showExitDialog = false; focusMainMenu() },
                             modifier = Modifier.weight(1f).focusRequester(exitNoFocusRequester),
                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -1860,10 +1914,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             Text(stringResource(R.string.action_no_caps), modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                         Button(
-                            onClick = {
-                                viewModel.stopPlayback()
-                                (context as? Activity)?.finish()
-                            },
+                            onClick = { exitApp() },
                             modifier = Modifier.weight(1f).focusRequester(exitYesFocusRequester),
                             colors = androidx.tv.material3.ButtonDefaults.colors(
                                 containerColor = MaterialTheme.colorScheme.error,
@@ -2060,6 +2111,7 @@ fun SettingsScreen(
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
     val autoReconnectEnabled by viewModel.autoReconnectEnabled.collectAsState()
     val extraBufferingEnabled by viewModel.extraBufferingEnabled.collectAsState()
+    val bestStreamEnabled by viewModel.bestStreamEnabled.collectAsState()
     val defaultCategory by viewModel.defaultCategory.collectAsState()
     val appLanguage by viewModel.appLanguage.collectAsState()
 
@@ -2481,6 +2533,19 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
+                        onClick = { viewModel.setBestStreamEnabled(!bestStreamEnabled) },
+                        headlineContent = { Text(stringResource(R.string.settings_best_stream)) },
+                        supportingContent = { Text(stringResource(R.string.settings_best_stream_desc)) },
+                        leadingContent = { Icon(Icons.Default.GraphicEq, contentDescription = null) },
+                        trailingContent = {
+                            Switch(checked = bestStreamEnabled, onCheckedChange = null)
+                        }
+                    )
+                }
+
+                item {
+                    ListItem(
+                        selected = false,
                         onClick = { viewModel.setExtraBufferingEnabled(!extraBufferingEnabled) },
                         headlineContent = { Text(stringResource(R.string.settings_extra_buffering)) },
                         supportingContent = { Text(stringResource(R.string.settings_extra_buffering_desc)) },
@@ -2571,9 +2636,7 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
-                        onClick = {
-                            viewModel.openFilePicker(isExport = true, suggestedFileName = viewModel.getTimestampedBackupFileName())
-                        },
+                        onClick = onExportPlaylist,
                         headlineContent = { Text(stringResource(R.string.settings_backup_favs)) },
                         supportingContent = { Text(stringResource(R.string.settings_backup_favs_desc)) },
                         leadingContent = { Icon(Icons.Default.CloudUpload, contentDescription = null) }
@@ -2583,9 +2646,7 @@ fun SettingsScreen(
                 item {
                     ListItem(
                         selected = false,
-                        onClick = {
-                            viewModel.openFilePicker(isExport = false)
-                        },
+                        onClick = onImportPlaylist,
                         headlineContent = { Text(stringResource(R.string.settings_restore_favs)) },
                         supportingContent = { Text(stringResource(R.string.settings_restore_favs_desc)) },
                         leadingContent = { Icon(Icons.Default.CloudDownload, contentDescription = null) }
@@ -2907,7 +2968,9 @@ fun GenreGroupGrid(
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            itemsIndexed(groups, key = { _, group -> group.genreName }) { index, group ->
+            // A genre and a country can share a name, so the kind is part of the key;
+            // Compose crashes on duplicate keys.
+            itemsIndexed(groups, key = { _, group -> (if (group.isCountry) "country:" else "genre:") + group.genreName }) { index, group ->
                 GenreGroupCard(
                     group = group.copy(genreName = group.genreName.toTitleCase()),
                     onHome = group.genreName in homeGenres,
@@ -3314,7 +3377,11 @@ fun StationGrid(
     onLoadMore: (() -> Unit)? = null,
     onLongClick: (Station) -> Unit = {}
 ) {
+    // Grid items are keyed by stationUuid and Compose crashes on duplicate keys, so make the
+    // list unique here no matter where it came from (prefs, imports, merged API pages).
+    val stations = remember(stations) { stations.distinctBy { it.stationUuid } }
     val currentStation by viewModel.currentStation.collectAsState()
+    val playingFromUuid by viewModel.playingFromUuid.collectAsState()
     val selectedNavItem by viewModel.selectedNavItem.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val focusRequester = remember { FocusRequester() }
@@ -3388,7 +3455,9 @@ fun StationGrid(
                     StationCard(
                         station = station,
                         isFavorite = selectedNavItem != NavigationItem.Favourites && viewModel.isFavorite(station),
-                        isCurrent = currentStation?.stationUuid == station.stationUuid,
+                        // A better stream of this entry may be playing under another UUID.
+                        isCurrent = currentStation != null &&
+                            (currentStation?.stationUuid == station.stationUuid || playingFromUuid == station.stationUuid),
                         onClick = { if (!isLongClickActive) viewModel.playStation(station) },
                         onLongClick = { onLongClick(station) },
                         modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
@@ -3572,7 +3641,9 @@ fun CountryGrid(
             contentPadding = PaddingValues(start = 12.dp, end = 32.dp, top = 32.dp, bottom = 140.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            itemsIndexed(countries, key = { _, country -> country.iso_3166_1 }) { index, country ->
+            // ISO codes alone are not unique in radio-browser's country list (and some are
+            // empty), and duplicate keys crash the grid — so the name is part of the key.
+            itemsIndexed(countries, key = { _, country -> "${country.iso_3166_1}|${country.name}" }) { index, country ->
                 Card(
                     onClick = { onCountryClick(country) },
                     modifier = Modifier

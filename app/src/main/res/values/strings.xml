@@ -20,7 +20,7 @@
     <string name="settings_auto_reconnect">Auto Reconnect</string>
     <string name="settings_extra_buffering">Extra Buffering</string>
     <string name="settings_ambient_screensaver">Ambient &amp; Screensaver</string>
-    <string name="settings_audio_passthrough">Audio Passthrough (Bit-Perfect)</string>
+    <string name="settings_audio_passthrough">High-Resolution Output</string>
     <string name="settings_smart_filter">Smart Filter</string>
     <string name="settings_min_tag_count">Min Tag Station Count</string>
     <string name="settings_bg_sync">Background Synchronization</string>
@@ -47,7 +47,7 @@
     <string name="settings_extra_buffering_desc">Increase buffer size for unstable connections (increases start time)</string>
     <string name="settings_ambient_screensaver_desc_enabled">Enabled (%1$dm)</string>
     <string name="settings_ambient_screensaver_desc_disabled">Disabled</string>
-    <string name="settings_audio_passthrough_desc">Experimental: Bypass Android resampler. Note: Ensure \'Match content sample rate\' is ON in Shield settings.</string>
+    <string name="settings_audio_passthrough_desc">Sends audio to Android as 32-bit float, so 24-bit (hi-res FLAC) streams are not reduced to 16-bit. Android still mixes audio at the device sample rate, so this is not bit-perfect.</string>
     <string name="settings_smart_filter_desc">Automatically hide stations with reported connection issues</string>
     <string name="settings_min_tag_count_desc">Do not load tags with less than 101 stations</string>
     <string name="settings_bg_sync_desc_12">12 Hours</string>
@@ -171,9 +171,6 @@
     <string name="go_to_parent_directory">Go to Parent Directory</string>
     <string name="file_type_folder">Folder</string>
     <string name="export_filename_label">Export filename:</string>
-    <string name="playback_channel_name">Playback</string>
-    <string name="playback_notification_placeholder">Pure Radio</string>
-    <string name="playback_notification_connecting">Connecting to station…</string>
 
     <!-- UI refresh: empty states, settings sections, player bar -->
     <string name="settings_section_general">GENERAL</string>
@@ -195,4 +192,9 @@
     <string name="content_desc_play">Play</string>
     <string name="content_desc_pause">Pause</string>
     <string name="content_desc_clear">Clear</string>
+
+    <!-- Stream quality -->
+    <string name="settings_best_stream">Best Stream Quality</string>
+    <string name="settings_best_stream_desc">Play the highest-quality version of a station when it is listed with several streams, and the top bitrate of adaptive (HLS) streams</string>
+    <string name="stream_upgraded_notice">Playing a better stream of this station: %1$s</string>
 </resources>

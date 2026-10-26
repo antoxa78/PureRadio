@@ -8,7 +8,6 @@ import android.content.ServiceConnection
 import android.net.Uri
 import android.os.Environment
 import android.os.IBinder
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
@@ -27,6 +26,7 @@ import com.toxa.pureradio.data.repository.RadioRepository
 import com.toxa.pureradio.network.Country
 import com.toxa.pureradio.network.ServerStats
 import com.toxa.pureradio.network.Tag
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -38,9 +38,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
 enum class NavigationItem {
@@ -280,12 +279,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val autoReconnectEnabled: StateFlow<Boolean> = _autoReconnectEnabled
 
     private val _extraBufferingEnabled = MutableStateFlow(prefs.getBoolean("extra_buffering", false))
+
+    private val _bestStreamEnabled = MutableStateFlow(prefs.getBoolean("best_stream" /* = PlaybackService.PREF_BEST_STREAM */, true))
+    val bestStreamEnabled: StateFlow<Boolean> = _bestStreamEnabled
+
+    // UUID of the list entry the user (or auto-advance) picked; differs from currentStation's
+    // UUID when a better stream of that station is playing instead.
+    private val _playingFromUuid = MutableStateFlow<String?>(null)
+    val playingFromUuid: StateFlow<String?> = _playingFromUuid
     val extraBufferingEnabled: StateFlow<Boolean> = _extraBufferingEnabled
 
     private var lastInteractionTime = System.currentTimeMillis()
     private var consecutiveErrors = 0
     private var stationRetryCount = 0
     private var retryJob: kotlinx.coroutines.Job? = null
+    // Pending "better stream" lookup started by playStation(); cancelled when another station
+    // is chosen or playback is stopped.
+    private var streamLookupJob: kotlinx.coroutines.Job? = null
     // Clears the retry budget only after playback has stayed up for a while — resetting it
     // the instant a reconnect succeeds would let a rapidly flapping stream retry forever.
     private var retryResetJob: kotlinx.coroutines.Job? = null
@@ -307,22 +317,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun isCurrentContentRequest(requestId: Long): Boolean =
         requestId == contentRequestId
 
-    init {
-        applyLanguage(_appLanguage.value)
-        loadTags()
-        loadCountries()
-        loadStats()
-        selectNavigationItem(_defaultCategory.value, force = true)
-        startPlaybackTimer()
-        startScreensaverTimer()
-        checkAutoUpdate()
-        refreshFavoriteStations()
-        refreshRecentStations()
-        viewModelScope.launch {
-            delay(500)
-            _isInitialized.value = true
-        }
-    }
+    // NOTE: the ViewModel's start-up work lives in the single `init` block at the very END of
+    // this class. Kotlin runs property initializers and init blocks in textual order, so an
+    // init placed up here would run while properties declared further down (e.g.
+    // _searchFocusTrigger, loadingMoreStations, playerListener) are still null — which crashed
+    // the app on launch when the start-up category was set to Search.
 
     /**
      * Shared between the initial player and any player rebuilt later by
@@ -402,6 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val connectedPlayer = service.getPlayer()
             player = connectedPlayer
             connectedPlayer?.addListener(playerListener)
+            connectedPlayer?.let { restoreStateFromPlayer(it) }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -410,6 +410,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playbackService = null
             serviceBound = false
         }
+    }
+
+    /**
+     * The service (and its player) outlive this ViewModel: audio keeps playing after the
+     * Activity is closed (PiP window dismissed, app swiped away, Activity destroyed by the
+     * system). When the app is opened again a fresh ViewModel binds to that still-running
+     * player, so pull the current station / play state back from it — otherwise the UI shows
+     * nothing playing while audio is audible, with no Now Playing bar to stop it.
+     */
+    private fun restoreStateFromPlayer(connectedPlayer: ExoPlayer) {
+        if (_currentStation.value != null) return
+        val item = connectedPlayer.currentMediaItem ?: return
+        if (connectedPlayer.playbackState == Player.STATE_IDLE) return
+        val uuid = item.mediaId
+        // playStation() always puts the station at the top of Recent, so it is normally there.
+        val station = _recentStations.value.firstOrNull { it.stationUuid == uuid }
+            ?: _favoriteStations.value.firstOrNull { it.stationUuid == uuid }
+            ?: Station(
+                stationUuid = uuid,
+                name = item.mediaMetadata.title?.toString().orEmpty(),
+                url = item.localConfiguration?.uri?.toString().orEmpty(),
+                favicon = "",
+                tags = "",
+                country = "",
+                countryCode = null,
+                language = "",
+                votes = 0,
+                codec = "",
+                bitrate = 0
+            )
+        _currentStation.value = station
+        _isPlaying.value = connectedPlayer.isPlaying
+        _mediaMetadata.value = connectedPlayer.mediaMetadata
+        playerListener.onTracksChanged(connectedPlayer.currentTracks)
     }
 
     /**
@@ -430,14 +464,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playbackServiceConnection,
             Context.BIND_AUTO_CREATE
         )
-    }
-
-    /**
-     * Must run after [playerListener] and [playbackServiceConnection] are initialized,
-     * otherwise the connection reference is still null when [initializePlayer] binds.
-     */
-    init {
-        initializePlayer()
     }
 
     /** Rebuilds the ExoPlayer inside the service with new buffering/passthrough settings. */
@@ -641,6 +667,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         applyHomeSettings(homeSettings, replace = replace)
         _pendingImportStations.value = null
         _pendingHomeSettings.value = null
+        val parts = buildList {
+            if (stations.isNotEmpty()) add("${stations.size} stations")
+            homeSettings?.let { add("${it.genres.size + it.countries.size} home categories") }
+        }
+        _successMessage.value = "Imported ${parts.joinToString(" and ")}"
         refreshFavoriteStations()
     }
 
@@ -967,8 +998,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _lastDbUpdate.value = System.currentTimeMillis()
                     prefs.edit().putLong("last_db_update", _lastDbUpdate.value).apply()
                 }
-                _tags.value = repository.getTags(limit = 500)
-                _countries.value = repository.getCountries()
+                // De-duplicated because the UI grids key their items by these values and
+                // Compose crashes on duplicate keys.
+                _tags.value = repository.getTags(limit = 500).distinctBy { it.name }
+                _countries.value = repository.getCountries().distinctBy { it.iso_3166_1 to it.name }
             } catch (e: Exception) {
                 _error.value = "Failed to update database"
             } finally {
@@ -1420,7 +1453,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     NavigationItem.Home, NavigationItem.Genres -> {
                         val tag = _selectedTag.value
                         if (tag != null) {
-                            repository.searchStations(tag = tag.name, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                            repository.searchStations(tag = tag.name, tagExact = true, limit = 100, offset = newOffset, hideBroken = hideBroken)
                         } else {
                             repository.searchStations(limit = 100, offset = newOffset, hideBroken = hideBroken)
                         }
@@ -1428,14 +1461,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     NavigationItem.Countries -> {
                         val country = _selectedCountry.value
                         if (country != null) {
-                            repository.searchStations(country = country.name, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                            searchCountryStations(country.name, country.iso_3166_1, offset = newOffset, hideBroken = hideBroken)
                         } else emptyList()
                     }
                     NavigationItem.Search -> {
                         val selectedTag = _selectedSearchTag.value
                         val query = _searchQuery.value
                         if (selectedTag != null) {
-                            repository.searchStations(tag = selectedTag, limit = 100, offset = newOffset, hideBroken = hideBroken)
+                            repository.searchStations(tag = selectedTag, tagExact = true, limit = 100, offset = newOffset, hideBroken = hideBroken)
                         } else if (query.isNotEmpty()) {
                             if (_searchMode.value == SearchMode.Name) {
                                 repository.searchStations(query = query, limit = 100, offset = newOffset, hideBroken = hideBroken)
@@ -1527,28 +1560,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Throttle concurrent requests and publish each group as it finishes so
                     // the Home screen fills in progressively instead of waiting for every
                     // category to complete.
+                    //
+                    // Tiles already on screen are kept (minus categories that are no longer
+                    // selected) and each one is REPLACED in place when its fresh data arrives.
+                    // Appending instead used to duplicate every tile (and crash the grid,
+                    // which keys items by category name) whenever Home was reloaded, e.g.
+                    // after toggling a bitrate filter.
+                    _genreGroups.value = _genreGroups.value
+                        .filter { g ->
+                            if (g.isCountry) g.genreName in selectedCountries else g.genreName in selectedGenres
+                        }
+                        .distinctBy { it.isCountry to it.genreName }
+
+                    // Each request catches its own failure. An exception escaping an async
+                    // child would cancel this launch and reach the uncaught-exception handler
+                    // (killing the app) even though await() sits inside try/catch below.
                     val throttle = Semaphore(maxHomeRequestsInFlight)
-                    val mutex = Mutex()
                     val deferred = selectedGenres.map { genre ->
                         async(Dispatchers.IO) {
-                            throttle.withPermit {
-                                fetchHomeGenreGroup(genre, bitrates, hideBroken)
+                            try {
+                                throttle.withPermit { fetchHomeGenreGroup(genre, bitrates, hideBroken) }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                null
                             }
                         }
                     } + selectedCountries.map { country ->
                         async(Dispatchers.IO) {
-                            throttle.withPermit {
-                                fetchHomeCountryGroup(country, bitrates, hideBroken)
+                            try {
+                                throttle.withPermit { fetchHomeCountryGroup(country, bitrates, hideBroken) }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                null
                             }
                         }
                     }
 
+                    var failedCount = 0
                     deferred.forEach { d ->
                         val group = d.await()
                         if (!isCurrentContentRequest(requestId)) return@launch
-                        mutex.withLock {
-                            _genreGroups.value = _genreGroups.value + group
+                        if (group == null) {
+                            failedCount++
+                            return@forEach
                         }
+                        val current = _genreGroups.value
+                        val index = current.indexOfFirst {
+                            it.isCountry == group.isCountry && it.genreName == group.genreName
+                        }
+                        _genreGroups.value = if (index >= 0) {
+                            current.toMutableList().also { it[index] = group }
+                        } else {
+                            current + group
+                        }
+                    }
+                    if (failedCount > 0 && isCurrentContentRequest(requestId)) {
+                        _error.value = "Failed to load $failedCount of ${deferred.size} categories"
                     }
                 }
             } catch (e: Exception) {
@@ -1577,12 +1646,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         hideBroken: Boolean
     ): GenreGroup {
         var offset = 0
-        var allStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+        var allStations = repository.searchStations(tag = genre, tagExact = true, limit = 100, offset = offset, hideBroken = hideBroken)
         var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
         var pages = 1
         while (pages < maxHomeGroupPages && allStations.size >= 100 && filteredCount < 100) {
             offset += 100
-            val moreStations = repository.searchStations(tag = genre, limit = 100, offset = offset, hideBroken = hideBroken)
+            val moreStations = repository.searchStations(tag = genre, tagExact = true, limit = 100, offset = offset, hideBroken = hideBroken)
             if (moreStations.isEmpty()) break
             allStations = (allStations + moreStations).distinctBy { it.stationUuid }
             filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
@@ -1592,18 +1661,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return GenreGroup(genre, allStations, total, filteredCount, isCountry = false)
     }
 
+    /**
+     * Stations for one country. radio-browser's `country=` parameter is a substring match
+     * ("Niger" also returns Nigeria, "Sudan" also South Sudan), so filter by the ISO code
+     * when it is known and fall back to an exact name match otherwise.
+     */
+    private suspend fun searchCountryStations(
+        countryName: String,
+        isoCode: String?,
+        tag: String? = null,
+        offset: Int = 0,
+        hideBroken: Boolean
+    ): List<Station> {
+        val code = isoCode?.trim()?.takeIf { it.isNotEmpty() }
+            ?: _countries.value.firstOrNull { it.name.equals(countryName, ignoreCase = true) }
+                ?.iso_3166_1?.trim()?.takeIf { it.isNotEmpty() }
+        return if (code != null) {
+            repository.searchStations(countryCode = code, tag = tag, limit = 100, offset = offset, hideBroken = hideBroken)
+        } else {
+            repository.searchStations(country = countryName, countryExact = true, tag = tag, limit = 100, offset = offset, hideBroken = hideBroken)
+        }
+    }
+
     private suspend fun fetchHomeCountryGroup(
         country: String,
         bitrates: Set<BitrateFilter>,
         hideBroken: Boolean
     ): GenreGroup {
         var offset = 0
-        var allStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+        var allStations = searchCountryStations(country, null, offset = offset, hideBroken = hideBroken)
         var filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
         var pages = 1
         while (pages < maxHomeGroupPages && allStations.size >= 100 && filteredCount < 100) {
             offset += 100
-            val moreStations = repository.searchStations(country = country, limit = 100, offset = offset, hideBroken = hideBroken)
+            val moreStations = searchCountryStations(country, null, offset = offset, hideBroken = hideBroken)
             if (moreStations.isEmpty()) break
             allStations = (allStations + moreStations).distinctBy { it.stationUuid }
             filteredCount = allStations.count { matchesBitrateFilter(it, bitrates) }
@@ -1620,7 +1711,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isLoading.value = true
                 try {
                     val tags = repository.getTags()
-                    _tags.value = tags
+                    _tags.value = tags.distinctBy { it.name }
                 } catch (e: Exception) {
                     if (isCurrentContentRequest(requestId)) {
                         _error.value = "Failed to load genres"
@@ -1643,7 +1734,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isLoading.value = true
                 try {
                     val countries = repository.getCountries()
-                    _countries.value = countries
+                    _countries.value = countries.distinctBy { it.iso_3166_1 to it.name }
                 } catch (e: Exception) {
                     if (isCurrentContentRequest(requestId)) {
                         _error.value = "Failed to load countries"
@@ -1720,7 +1811,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Favourites are matched by:
      * 1. exact Radio Browser UUID (the normal case), or
      * 2. normalized stream URL, or
-     * 3. case-insensitive name match.
+     * 3. case-insensitive whole-name match (never a partial / substring match).
      *
      * The URL/name fallbacks cover stations imported from external playlists: those carry
      * locally-generated UUIDs (and possibly older URLs), so they never equal the real
@@ -1741,8 +1832,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val favUrl = normalizeStreamUrl(fav.url)
             if (favUrl.isNotEmpty() && favUrl == stationUrl) return@any true
             val favName = fav.name.trim().lowercase()
-            favName.isNotEmpty() && stationName.isNotEmpty() &&
-                (stationName.contains(favName) || favName.contains(stationName))
+            // Whole-name equality only. A substring test made a favourite called "Rock"
+            // light up every station containing "rock", and toggling one of those removed
+            // the real favourite instead of adding the new station.
+            favName.isNotEmpty() && favName == stationName
         }
     }
 
@@ -1788,8 +1881,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (candidateUrl.isNotEmpty() && candidateUrl == favouriteUrl) return true
         val candidateName = candidate.name.trim().lowercase()
         val favouriteName = favourite.name.trim().lowercase()
-        return candidateName.isNotEmpty() && favouriteName.isNotEmpty() &&
-            (candidateName.contains(favouriteName) || favouriteName.contains(candidateName))
+        return candidateName.isNotEmpty() && candidateName == favouriteName
     }
 
     fun exportFavoritesToM3u(uri: Uri) {
@@ -1825,14 +1917,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 if (parsed.stations.isNotEmpty() || parsed.homeSettings != null) {
-                    mergeImportedStations(parsed.stations)
-                    applyHomeSettings(parsed.homeSettings, replace = false)
-                    val parts = buildList {
-                        if (parsed.stations.isNotEmpty()) add("${parsed.stations.size} stations")
-                        parsed.homeSettings?.let { add("${it.genres.size + it.countries.size} home categories") }
-                    }
-                    _successMessage.value = "Imported ${parts.joinToString(" and ")}"
-                    refreshFavoriteStations()
+                    // Same Add / Replace dialog as the built-in file browser
+                    // (see confirmRestore / cancelRestore).
+                    _pendingImportStations.value = parsed.stations
+                    _pendingHomeSettings.value = parsed.homeSettings
                 } else {
                     _error.value = "No stations found in file"
                 }
@@ -1866,7 +1954,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
-                val stations = repository.searchStations(tag = tag.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                val stations = repository.searchStations(tag = tag.name, tagExact = true, limit = 100, hideBroken = _hideBrokenStations.value)
                 if (!isCurrentContentRequest(requestId)) return@launch
                 _hasMoreStations.value = stations.size >= 100
                 if (isFlacFilter) {
@@ -1911,11 +1999,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val isFlacFilter = _selectedBitrates.value.contains(BitrateFilter.FLAC)
-                val stations = repository.searchStations(country = country.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                val stations = searchCountryStations(country.name, country.iso_3166_1, hideBroken = _hideBrokenStations.value)
                 if (!isCurrentContentRequest(requestId)) return@launch
                 _hasMoreStations.value = stations.size >= 100
                 if (isFlacFilter) {
-                    val flacStations = repository.searchStations(tag = "flac", country = country.name, limit = 100, hideBroken = _hideBrokenStations.value)
+                    val flacStations = searchCountryStations(country.name, country.iso_3166_1, tag = "flac", hideBroken = _hideBrokenStations.value)
                     if (!isCurrentContentRequest(requestId)) return@launch
                     updateStations((stations + flacStations).distinctBy { it.stationUuid })
                 } else {
@@ -1989,7 +2077,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 _isLoading.value = true
                 try {
-                    val remoteStations = repository.searchStations(tag = tagName, limit = 100, hideBroken = hideBroken)
+                    val remoteStations = repository.searchStations(tag = tagName, tagExact = true, limit = 100, hideBroken = hideBroken)
                     if (!isCurrentContentRequest(requestId)) return@launch
                     _hasMoreStations.value = remoteStations.size >= 100
                     val combined = (_allStations.value + remoteStations).distinctBy { it.stationUuid }
@@ -2096,8 +2184,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (station.stationUuid != _currentStation.value?.stationUuid) {
             stationRetryCount = 0
+            // Remember which list entry was chosen, even if a better stream of it ends up
+            // playing (that stream has its own UUID and isn't in the list): Next/Previous
+            // and the "now playing" highlight on the tiles work from this.
+            _playingFromUuid.value = station.stationUuid
         }
         retryJob?.cancel()
+        streamLookupJob?.cancel()
         _isLoading.value = false
         var finalStation = station
         if (finalStation.countryCode.isNullOrEmpty()) {
@@ -2110,19 +2203,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addToRecentSearches(_searchQuery.value)
         }
 
+        // "Best Stream Quality": for a station the user picked (not for reconnects or the
+        // automatic skip after errors), first look for a better stream of the same station.
+        // The lookup is capped at a couple of seconds so a slow API never delays playback much.
+        if (resetErrors && _bestStreamEnabled.value) {
+            val requested = finalStation
+            player?.stop()
+            _currentStation.value = requested
+            _error.value = null
+            _mediaMetadata.value = null
+            _audioFormat.value = null
+            streamLookupJob = viewModelScope.launch {
+                val better = try {
+                    withTimeoutOrNull(2_500) { findBetterStream(requested) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                if (better != null) {
+                    _successMessage.value = getApplication<Application>().getString(
+                        com.toxa.pureradio.R.string.stream_upgraded_notice,
+                        streamQualityText(better)
+                    )
+                }
+                startPlayback(better ?: requested)
+            }
+        } else {
+            startPlayback(finalStation)
+        }
+    }
+
+    private fun startPlayback(finalStation: Station) {
         addToRecent(finalStation)
         _currentStation.value = finalStation
         _error.value = null
         _mediaMetadata.value = null
         _audioFormat.value = null
-        // Promote the (already-bound) playback service to a foreground service so audio
-        // survives the app leaving the foreground. The service calls startForeground()
-        // immediately in onStartCommand (see PlaybackService), satisfying the system's
-        // startForegroundService() timeout even while a slow/failing stream is connecting.
-        val startIntent = Intent(getApplication(), PlaybackService::class.java).apply {
-            putExtra(PlaybackService.EXTRA_STATION_NAME, finalStation.name)
-        }
-        ContextCompat.startForegroundService(getApplication(), startIntent)
+        // No explicit startForegroundService() here: PlaybackService registers its session
+        // with Media3, which starts the service in the foreground with the standard media
+        // notification as soon as playback begins (and handles the Android 12+ background
+        // start restrictions itself).
         player?.let {
             it.stop()
             it.clearMediaItems()
@@ -2148,12 +2269,100 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ---------- Best stream selection ----------
+
+    /**
+     * radio-browser often lists one station several times — one entry per stream (e.g. an
+     * MP3 128k and an AAC 320k). Returns a clearly better stream of the SAME station, or null.
+     *
+     * "Same station" = same name AND same homepage. Many unrelated stations share a name
+     * ("Radio 1"), so without a homepage on both sides nothing is swapped.
+     */
+    private suspend fun findBetterStream(station: Station): Station? {
+        val homepage = normalizeHomepage(station.homepage) ?: return null
+        val name = station.name.trim()
+        if (name.isEmpty() || station.bitrate <= 0 || isLossless(station)) return null
+        val candidates = repository.searchStations(
+            query = name,
+            nameExact = true,
+            limit = 50,
+            hideBroken = true
+        )
+        return candidates
+            .asSequence()
+            .filter { it.stationUuid != station.stationUuid }
+            .filter { it.name.trim().equals(name, ignoreCase = true) }
+            .filter { normalizeHomepage(it.homepage) == homepage }
+            .filter { it.url.isNotBlank() && !isVideoCodec(it) }
+            .maxByOrNull { streamQualityScore(it) }
+            ?.takeIf { isClearlyBetter(it, station) }
+            ?.let { better ->
+                // Keep the country code if only the original entry had it (for the flag).
+                if (better.countryCode.isNullOrEmpty()) better.copy(countryCode = station.countryCode) else better
+            }
+    }
+
+    private fun normalizeHomepage(url: String?): String? =
+        url?.trim()?.lowercase()
+            ?.removePrefix("https://")?.removePrefix("http://")?.removePrefix("www.")
+            ?.trimEnd('/')
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun isLossless(station: Station): Boolean =
+        station.codec.orEmpty().contains("FLAC", ignoreCase = true)
+
+    private fun isVideoCodec(station: Station): Boolean {
+        val codec = station.codec.orEmpty().uppercase()
+        return codec.contains("H.26") || codec.contains("VIDEO") || codec.contains("VP9") || codec.contains("AV1")
+    }
+
+    /**
+     * Rough perceptual quality: lossless beats everything; otherwise bitrate, with AAC/Opus/
+     * Vorbis credited ~30% over MP3 at the same bitrate (they are more efficient codecs).
+     */
+    private fun streamQualityScore(station: Station): Double {
+        if (isLossless(station)) return 100_000.0 + station.bitrate
+        if (station.bitrate <= 0) return 0.0
+        val codec = station.codec.orEmpty().uppercase()
+        val efficiency = if (codec.contains("AAC") || codec.contains("OPUS") ||
+            codec.contains("OGG") || codec.contains("VORBIS")) 1.3 else 1.0
+        return station.bitrate * efficiency
+    }
+
+    /** Only switch for a real improvement (≥20% better), never to an unknown-bitrate stream. */
+    private fun isClearlyBetter(candidate: Station, current: Station): Boolean {
+        if (isLossless(candidate) && !isLossless(current)) return true
+        if (candidate.bitrate <= 0) return false
+        return streamQualityScore(candidate) >= streamQualityScore(current) * 1.2
+    }
+
+    private fun streamQualityText(station: Station): String {
+        val codec = station.codec.orEmpty().trim().uppercase().takeIf { it.isNotEmpty() && it != "UNKNOWN" }
+        val bitrate = station.bitrate.takeIf { it > 0 }?.let { "${it}k" }
+        return listOfNotNull(codec, bitrate).joinToString(" · ")
+    }
+
+    fun setBestStreamEnabled(enabled: Boolean) {
+        _bestStreamEnabled.value = enabled
+        prefs.edit().putBoolean("best_stream" /* = PlaybackService.PREF_BEST_STREAM */, enabled).apply()
+        // Applies immediately to the current player (no rebuild needed).
+        player?.let {
+            it.trackSelectionParameters = it.trackSelectionParameters.buildUpon()
+                .setForceHighestSupportedBitrate(enabled)
+                .build()
+        }
+    }
+
+    /** True for the entry that is playing: either its own stream or a better stream of it. */
+    private fun isNowPlaying(station: Station, current: Station): Boolean =
+        station.stationUuid == current.stationUuid || station.stationUuid == _playingFromUuid.value
+
     fun playNext(isAuto: Boolean = false) {
         val current = _currentStation.value ?: return
         
         // Use the primary filtered list if the current station is in it
         val activeList = _stations.value
-        val indexInActive = activeList.indexOfFirst { it.stationUuid == current.stationUuid }
+        val indexInActive = activeList.indexOfFirst { isNowPlaying(it, current) }
         
         val list = if (indexInActive != -1) {
             activeList
@@ -2172,13 +2381,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (list.isEmpty()) return
 
         // If there's only one station and it failed, stop to avoid infinite loop
-        if (list.size == 1 && list[0].stationUuid == current.stationUuid) {
+        if (list.size == 1 && isNowPlaying(list[0], current)) {
             _error.value = "Station unavailable"
             stopPlayback()
             return
         }
 
-        val index = list.indexOfFirst { it.stationUuid == current.stationUuid }
+        val index = list.indexOfFirst { isNowPlaying(it, current) }
         if (index != -1) {
             val nextIndex = (index + 1) % list.size
             playStation(list[nextIndex], !isAuto)
@@ -2189,7 +2398,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _currentStation.value ?: return
         
         val activeList = _stations.value
-        val indexInActive = activeList.indexOfFirst { it.stationUuid == current.stationUuid }
+        val indexInActive = activeList.indexOfFirst { isNowPlaying(it, current) }
         
         val list = if (indexInActive != -1) {
             activeList
@@ -2206,7 +2415,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (list.isEmpty()) return
-        val index = list.indexOfFirst { it.stationUuid == current.stationUuid }
+        val index = list.indexOfFirst { isNowPlaying(it, current) }
         if (index != -1) {
             val prevIndex = if (index - 1 < 0) list.size - 1 else index - 1
             playStation(list[prevIndex])
@@ -2230,13 +2439,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopPlayback() {
         retryJob?.cancel()
         retryResetJob?.cancel()
+        streamLookupJob?.cancel()
+        _playingFromUuid.value = null
         player?.stop()
+        // Clearing the item also makes Media3 remove the media notification.
+        player?.clearMediaItems()
         _isPlaying.value = false
         _currentStation.value = null
         _infoMessage.value = null
-        // Drop the service out of the foreground now that nothing is playing and nothing
-        // will auto-resume. The service (and player) stay alive as long as we're still
-        // bound, so the next playStation() call is instant.
+        // Media3 already dropped the service out of the foreground when the player stopped;
+        // this clears its "started" state too. The service (and player) stay alive as long
+        // as we're still bound, so the next playStation() call is instant.
         getApplication<Application>().stopService(Intent(getApplication(), PlaybackService::class.java))
     }
 
@@ -2290,5 +2503,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // "stop the app" flows (Exit, the PiP stop action) already call stopPlayback().
         player = null
         playbackService = null
+    }
+
+    /**
+     * Start-up work. Deliberately the LAST declaration in the class: every property above is
+     * initialized by the time this runs, so nothing called from here can see a null field.
+     */
+    init {
+        applyLanguage(_appLanguage.value)
+        loadTags()
+        loadCountries()
+        loadStats()
+        selectNavigationItem(_defaultCategory.value, force = true)
+        startPlaybackTimer()
+        startScreensaverTimer()
+        checkAutoUpdate()
+        refreshFavoriteStations()
+        refreshRecentStations()
+        viewModelScope.launch {
+            delay(500)
+            _isInitialized.value = true
+        }
+        initializePlayer()
     }
 }

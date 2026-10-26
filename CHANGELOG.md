@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-10-26
 
 ### Changed (UI)
 - **Empty & loading states**: Favourites, Recent, searches with no results and over-filtered lists now show a clear message with a hint instead of a blank screen; empty lists that are still loading show a spinner.
@@ -15,7 +15,24 @@ All notable changes to this project will be documented in this file.
 - **Navigation icons**: Popular, Genres and Countries use more fitting icons.
 - **Search**: Localized NAME/TAG mode button with icons, history icons on recent searches and a "Clear" button.
 
+### Added
+- **Best Stream Quality** (Settings › Playback, on by default): when a station is listed on radio-browser with several streams, the best one (same name and homepage, ≥20% better, lossless preferred) is played automatically, with a short notice; adaptive HLS streams always use their top bitrate.
+
+### Changed
+- The "Audio Passthrough (Bit-Perfect)" setting is now called **High-Resolution Output** and describes what it really does (32-bit float output so 24-bit streams aren't cut to 16-bit; not bit-perfect). Its no-op extension-decoder option was removed.
+
 ### Fixed
+- **Back navigation**: Back on a main screen opens the main menu; Back again asks to exit. Focus no longer gets lost after re-selecting the current section or answering "No" in the exit dialog; Back during the splash is ignored.
+- **Crash on launch** when the start-up category was set to Search (ViewModel init order).
+- **Crash on Home** when any single category request failed (timeout, rate limit, offline) while loading curated categories; failed tiles are now skipped with a short notice.
+- **Duplicated Home tiles / crash** after toggling a bitrate filter or Hide-broken on Home; tiles are now refreshed in place. Grids also de-duplicate genres, countries and stations so duplicate keys can't crash them.
+- **Media notification & lock-screen controls**: the playback session is now registered with Media3, which shows the standard media notification and manages the foreground service; the permanent "Connecting…" notification is gone.
+- **Reopening the app during background playback** now shows the station that is playing (Now Playing bar, play state, metadata).
+- **Backup / Restore** use the system file picker again (no storage permission needed); the built-in browser is only a fallback. No more redirect to "All files access" on every launch / PiP return. Android 9/10 now request write permission for the fallback browser. Restoring from the system picker shows the Add / Replace dialog.
+- **Language switch on Android 12L and lower**: the activity is now an AppCompatActivity and the chosen language is stored by AppCompat.
+- **Favourites**: a favourite no longer marks (or gets removed by) other stations whose names merely contain its name.
+- **Countries / Genres**: stations are filtered by country code (or exact country name) and exact genre tag — "Niger" no longer lists Nigerian stations.
+- **Picture-in-Picture** now enters on Android 9–13 too, and auto-enter is only armed while something is playing.
 - Remaining hard-coded English text in the player bar, screensaver status line, search mode button and database update interval picker is now translated (RU/UK).
 
 ## [1.3.12] - 2026-10-03

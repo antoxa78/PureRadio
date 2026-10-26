@@ -45,13 +45,21 @@ class RadioRepository {
         country: String? = null,
         limit: Int = 100,
         offset: Int = 0,
-        hideBroken: Boolean = false
+        hideBroken: Boolean = false,
+        countryCode: String? = null,
+        countryExact: Boolean = false,
+        tagExact: Boolean = false,
+        nameExact: Boolean = false
     ): List<Station> {
         val service = getService()
         val results = service.searchStations(
             name = query,
+            nameExact = nameExact,
             tag = tag,
             country = country,
+            countryCode = countryCode,
+            countryExact = countryExact,
+            tagExact = tagExact,
             limit = limit,
             offset = offset,
             hideBroken = hideBroken
@@ -60,10 +68,13 @@ class RadioRepository {
         // Only fall back to a genre/tag search when the name search came up short of a
         // full page — most queries that already match plenty of stations by name don't
         // need a second network round-trip against radio-browser.info.
-        return if (query != null && tag == null && results.size < limit) {
+        // An exact-name lookup (used to find other streams of one station) never falls back.
+        return if (query != null && tag == null && !nameExact && results.size < limit) {
             val byTag = service.searchStations(
                 tag = query,
                 country = country,
+                countryCode = countryCode,
+                countryExact = countryExact,
                 limit = limit,
                 offset = offset,
                 hideBroken = hideBroken
