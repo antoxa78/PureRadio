@@ -24,21 +24,90 @@ private val RetroGoldColorScheme = darkColorScheme(
     onPrimaryContainer = RetroGold
 )
 
+// Distinct from Modern Blue: electric cyan on true black (was almost identical before).
 @OptIn(ExperimentalTvMaterial3Api::class)
 private val BlueNeonColorScheme = darkColorScheme(
-    primary = BluePrimary,
-    secondary = BlueSecondary,
-    tertiary = BlueTertiary,
-    background = Black,
-    surface = DarkGrey,
-    surfaceVariant = SurfaceGrey,
-    onPrimary = White,
+    primary = ElectricBlue,
+    secondary = ElectricBlueSoft,
+    tertiary = ElectricBluePale,
+    background = OledBlack,
+    surface = Color(0xFF05080D),
+    surfaceVariant = Color(0xFF0E1822),
+    onPrimary = Black,
     onSecondary = White,
     onTertiary = Black,
     onBackground = White,
     onSurface = White,
-    primaryContainer = BlueDark,
-    onPrimaryContainer = BluePrimary
+    primaryContainer = ElectricBlueDark,
+    onPrimaryContainer = ElectricBlue
+)
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+private val OledCrimsonColorScheme = darkColorScheme(
+    primary = Crimson,
+    secondary = CrimsonSoft,
+    tertiary = CrimsonPale,
+    background = OledBlack,
+    surface = Color(0xFF0C0507),
+    surfaceVariant = Color(0xFF1A0A0E),
+    onPrimary = Black,
+    onSecondary = Black,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    primaryContainer = CrimsonDark,
+    onPrimaryContainer = Crimson
+)
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+private val OledEmeraldColorScheme = darkColorScheme(
+    primary = Emerald,
+    secondary = EmeraldSoft,
+    tertiary = EmeraldPale,
+    background = OledBlack,
+    surface = Color(0xFF04120C),
+    surfaceVariant = Color(0xFF0C2018),
+    onPrimary = Black,
+    onSecondary = Black,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    primaryContainer = EmeraldDark,
+    onPrimaryContainer = Emerald
+)
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+private val OledMagentaColorScheme = darkColorScheme(
+    primary = Magenta,
+    secondary = MagentaSoft,
+    tertiary = MagentaPale,
+    background = OledBlack,
+    surface = Color(0xFF0D0510),
+    surfaceVariant = Color(0xFF1B0A21),
+    onPrimary = Black,
+    onSecondary = Black,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    primaryContainer = MagentaDark,
+    onPrimaryContainer = Magenta
+)
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+private val OledAmberColorScheme = darkColorScheme(
+    primary = AmberNeon,
+    secondary = AmberSoft,
+    tertiary = AmberPale,
+    background = OledBlack,
+    surface = Color(0xFF0D0A02),
+    surfaceVariant = Color(0xFF1E1704),
+    onPrimary = Black,
+    onSecondary = Black,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    primaryContainer = AmberDark,
+    onPrimaryContainer = AmberNeon
 )
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -140,6 +209,10 @@ fun PureRadioTheme(
         AppTheme.Monochrome -> MonochromeColorScheme
         AppTheme.Forest -> ForestColorScheme
         AppTheme.Contrast -> ContrastColorScheme
+        AppTheme.OledCrimson -> OledCrimsonColorScheme
+        AppTheme.OledEmerald -> OledEmeraldColorScheme
+        AppTheme.OledMagenta -> OledMagentaColorScheme
+        AppTheme.OledAmber -> OledAmberColorScheme
     }
     MaterialTheme(
         colorScheme = colorScheme,

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2] - 2026-10-27
+
+### Added
+- **OLED themes**: OLED Crimson, OLED Emerald, OLED Magenta and OLED Amber — true black backgrounds with bright accents, so OLED pixels stay off and the contrast is much higher.
+
+### Changed
+- **Blue Neon** is now electric cyan on true black instead of looking almost identical to Modern Blue.
+
 ## [1.4.1] - 2026-10-27
 
 ### Fixed

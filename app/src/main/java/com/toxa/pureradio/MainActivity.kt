@@ -607,6 +607,10 @@ fun appThemeDisplayName(theme: AppTheme): String = when (theme) {
     AppTheme.Monochrome -> stringResource(R.string.theme_monochrome)
     AppTheme.Forest -> stringResource(R.string.theme_forest)
     AppTheme.Contrast -> stringResource(R.string.theme_contrast)
+    AppTheme.OledCrimson -> stringResource(R.string.theme_oled_crimson)
+    AppTheme.OledEmerald -> stringResource(R.string.theme_oled_emerald)
+    AppTheme.OledMagenta -> stringResource(R.string.theme_oled_magenta)
+    AppTheme.OledAmber -> stringResource(R.string.theme_oled_amber)
 }
 
 @Composable
@@ -618,6 +622,10 @@ fun appThemeDescription(theme: AppTheme): String = when (theme) {
     AppTheme.Monochrome -> stringResource(R.string.theme_monochrome_desc)
     AppTheme.Forest -> stringResource(R.string.theme_forest_desc)
     AppTheme.Contrast -> stringResource(R.string.theme_contrast_desc)
+    AppTheme.OledCrimson -> stringResource(R.string.theme_oled_crimson_desc)
+    AppTheme.OledEmerald -> stringResource(R.string.theme_oled_emerald_desc)
+    AppTheme.OledMagenta -> stringResource(R.string.theme_oled_magenta_desc)
+    AppTheme.OledAmber -> stringResource(R.string.theme_oled_amber_desc)
 }
 
 @Composable

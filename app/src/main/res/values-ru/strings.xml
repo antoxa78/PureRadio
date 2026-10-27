@@ -114,13 +114,21 @@
     <string name="theme_monochrome">Монохром</string>
     <string name="theme_forest">Лес</string>
     <string name="theme_contrast">Контраст</string>
+    <string name="theme_oled_crimson">OLED Алый</string>
+    <string name="theme_oled_emerald">OLED Изумруд</string>
+    <string name="theme_oled_magenta">OLED Маджента</string>
+    <string name="theme_oled_amber">OLED Янтарь</string>
     <string name="theme_modern_blue_desc">Стильный синий с высокой контрастностью</string>
     <string name="theme_retro_gold_desc">Классические золотые и деревянные тона</string>
-    <string name="theme_blue_neon_desc">Холодное синее неоновое свечение</string>
+    <string name="theme_blue_neon_desc">Электрический циан на настоящем чёрном</string>
     <string name="theme_violet_desc">Пурпурные и фиолетовые тона</string>
     <string name="theme_monochrome_desc">Серый и чёрный</string>
     <string name="theme_forest_desc">Зелёный и чёрный</string>
     <string name="theme_contrast_desc">Белый и чёрный</string>
+    <string name="theme_oled_crimson_desc">Настоящий чёрный с алыми акцентами — для OLED-экранов</string>
+    <string name="theme_oled_emerald_desc">Настоящий чёрный с изумрудными акцентами</string>
+    <string name="theme_oled_magenta_desc">Настоящий чёрный с неоново-маджентовыми акцентами</string>
+    <string name="theme_oled_amber_desc">Настоящий чёрный с тёплыми янтарными акцентами</string>
 
     <string name="language_english">Английский</string>
     <string name="language_russian">Русский</string>

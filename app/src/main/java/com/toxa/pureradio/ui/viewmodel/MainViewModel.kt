@@ -91,7 +91,8 @@ enum class SearchMode {
 }
 
 enum class AppTheme {
-    ModernBlue, RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast
+    ModernBlue, RetroGold, BlueNeon, Violet, Monochrome, Forest, Contrast,
+    OledCrimson, OledEmerald, OledMagenta, OledAmber
 }
 
 enum class AppLanguage {

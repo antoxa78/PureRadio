@@ -124,13 +124,21 @@
     <string name="theme_monochrome">Monochrome</string>
     <string name="theme_forest">Forest</string>
     <string name="theme_contrast">Contrast</string>
+    <string name="theme_oled_crimson">OLED Crimson</string>
+    <string name="theme_oled_emerald">OLED Emerald</string>
+    <string name="theme_oled_magenta">OLED Magenta</string>
+    <string name="theme_oled_amber">OLED Amber</string>
     <string name="theme_modern_blue_desc">Sleek blue with high contrast</string>
     <string name="theme_retro_gold_desc">Classic gold and wood tones</string>
-    <string name="theme_blue_neon_desc">Cool blue neon glow</string>
+    <string name="theme_blue_neon_desc">Electric cyan on true black</string>
     <string name="theme_violet_desc">Purple and violet tones</string>
     <string name="theme_monochrome_desc">Grey and black</string>
     <string name="theme_forest_desc">Green and black</string>
     <string name="theme_contrast_desc">White and black</string>
+    <string name="theme_oled_crimson_desc">True black with crimson accents, made for OLED</string>
+    <string name="theme_oled_emerald_desc">True black with emerald accents</string>
+    <string name="theme_oled_magenta_desc">True black with magenta neon accents</string>
+    <string name="theme_oled_amber_desc">True black with warm amber accents</string>
 
     <!-- App language names -->
     <string name="language_english">English</string>
