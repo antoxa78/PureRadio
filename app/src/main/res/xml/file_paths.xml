@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Backups handed to a file manager via ACTION_SEND live here. -->
+    <cache-path
+        name="backups"
+        path="backups/" />
+</paths>

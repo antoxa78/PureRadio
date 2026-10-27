@@ -70,6 +70,14 @@ data class ParsedBackup(
     val homeSettings: PendingHomeSettings?
 )
 
+/** A generated backup file ready to be handed to a file manager's "Save to..." target. */
+data class BackupShareRequest(
+    val uri: Uri,
+    val fileName: String,
+    /** Set when a specific app (File Manager+) should be launched instead of a chooser. */
+    val target: ComponentName? = null
+)
+
 enum class ScreensaverMode {
     StationInfo, BlackScreen
 }
@@ -247,6 +255,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _pendingOverwriteFile = MutableStateFlow<File?>(null)
     val pendingOverwriteFile: StateFlow<File?> = _pendingOverwriteFile
+
+    // Set after a backup is written to the cache; the Activity shares it with a file manager
+    // and then clears this again.
+    private val _backupShareRequest = MutableStateFlow<BackupShareRequest?>(null)
+    val backupShareRequest: StateFlow<BackupShareRequest?> = _backupShareRequest
 
     private val _filePickerState = MutableStateFlow<FilePickerState?>(null)
     val filePickerState: StateFlow<FilePickerState?> = _filePickerState
@@ -1903,6 +1916,98 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _error.value = "Export failed: ${e.message}"
             }
         }
+    }
+
+    /**
+     * Writes the backup into the app cache and publishes it as a share request, so a file
+     * manager that handles "Save to..." (`ACTION_SEND`) can store it wherever the user
+     * wants. This is how Backup Data works on TVs without DocumentsUI (e.g. File Manager+).
+     */
+    fun prepareBackupForSharing(target: ComponentName? = null) {
+        viewModelScope.launch {
+            try {
+                val fileName = getTimestampedBackupFileName()
+                val context = getApplication<Application>()
+                val uri = withContext(Dispatchers.IO) {
+                    val dir = File(context.cacheDir, "backups")
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        throw java.io.IOException("Could not create the backup file")
+                    }
+                    // Only the newest backup needs to stay in the cache.
+                    dir.listFiles()?.forEach { old -> if (old.name != fileName) old.delete() }
+                    val file = File(dir, fileName)
+                    file.writeText(generateM3uContent())
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${com.toxa.pureradio.BuildConfig.APPLICATION_ID}.fileprovider",
+                        file
+                    )
+                }
+                _backupShareRequest.value = BackupShareRequest(uri, fileName, target)
+            } catch (e: Exception) {
+                _error.value = "Export failed: ${e.message}"
+            }
+        }
+    }
+
+    fun clearBackupShareRequest() {
+        _backupShareRequest.value = null
+    }
+
+    /**
+     * Backup fallback for devices that have no document picker at all (many Android TV
+     * firmwares only ship the "you don't have an app that can do this" stub). Saves to
+     * Downloads/PureRadio, which needs no storage permission on Android 10+ and is visible
+     * from any file manager.
+     */
+    fun exportFavoritesToDownloads() {
+        viewModelScope.launch {
+            try {
+                val fileName = getTimestampedBackupFileName()
+                val content = generateM3uContent()
+                val location = withContext(Dispatchers.IO) { writeBackupToDownloads(fileName, content) }
+                _successMessage.value = "Backup saved to $location"
+            } catch (e: Exception) {
+                _error.value = "Export failed: ${e.message}"
+            }
+        }
+    }
+
+    private fun writeBackupToDownloads(fileName: String, content: String): String {
+        val context = getApplication<Application>()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "audio/x-mpegurl")
+                put(
+                    android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_DOWNLOADS}/PureRadio"
+                )
+                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw java.io.IOException("Could not create the backup file")
+            try {
+                resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+                    ?: throw java.io.IOException("Could not open the backup file")
+                values.clear()
+                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+            return "${Environment.DIRECTORY_DOWNLOADS}/PureRadio/$fileName"
+        }
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "PureRadio"
+        )
+        if (!dir.exists() && !dir.mkdirs()) throw java.io.IOException("Could not create ${dir.path}")
+        val file = File(dir, fileName)
+        file.writeText(content)
+        return file.absolutePath
     }
 
     fun importFavoritesFromM3u(uri: Uri) {

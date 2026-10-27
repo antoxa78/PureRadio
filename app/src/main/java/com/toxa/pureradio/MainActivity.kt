@@ -9,6 +9,7 @@ import android.app.RemoteAction
 import android.graphics.drawable.Icon
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.app.Activity
 import android.content.IntentFilter
@@ -828,6 +829,33 @@ fun MessageToast(
     }
 }
 
+/**
+ * Whether a real (non-stub) app handles [intent].
+ *
+ * Android TV firmware often replaces DocumentsUI with a framework stub
+ * (`com.google.android.tv.frameworkpackagestubs` on Shield, `com.android.tv...` on other
+ * brands) that only shows "You don't have an app that can do this" and returns. Treating
+ * that stub as a picker made Backup Data dead-end, so it must count as "no picker installed"
+ * and let the in-app fallbacks take over.
+ */
+private fun hasRealIntentHandler(context: Context, intent: Intent): Boolean =
+    context.packageManager.queryIntentActivities(intent, 0).any {
+        !it.activityInfo.packageName.endsWith(".frameworkpackagestubs")
+    }
+
+/**
+ * File Manager+ offers both a document picker and a "Save to..." receiver, and is much easier
+ * to navigate with a TV remote than DocumentsUI. When it is installed, launch it directly
+ * instead of letting Android route to the system picker.
+ */
+private const val FILE_MANAGER_PLUS_PACKAGE = "com.alphainventor.filemanager"
+
+private fun findFileManagerPlusActivity(context: Context, intent: Intent): ComponentName? =
+    context.packageManager.queryIntentActivities(intent, 0)
+        .firstOrNull { it.activityInfo.packageName == FILE_MANAGER_PLUS_PACKAGE }
+        ?.activityInfo
+        ?.let { ComponentName(it.packageName, it.name) }
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
@@ -863,20 +891,58 @@ fun MainScreen(viewModel: MainViewModel) {
     val pendingImportStations by viewModel.pendingImportStations.collectAsState()
     val pendingHomeSettings by viewModel.pendingHomeSettings.collectAsState()
     val pendingOverwriteFile by viewModel.pendingOverwriteFile.collectAsState()
+    val backupShareRequest by viewModel.backupShareRequest.collectAsState()
     val quitConfirmationEnabled by viewModel.quitConfirmationEnabled.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
+    // StartActivityForResult (instead of OpenDocument) so the intent can target File Manager+
+    // explicitly: it is far easier to navigate with a TV remote than DocumentsUI.
+    // ACTION_OPEN_DOCUMENT, not GetContent (ACTION_GET_CONTENT): on Android 14 TVs without
+    // DocumentsUI the GET_CONTENT chooser only offers the photo picker, which tries to hand
+    // off to the missing DocumentsUI and lands back on itself — an endless activity loop
+    // that made the app look frozen as soon as "Restore Data" was pressed.
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.importFavoritesFromM3u(it) }
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { viewModel.importFavoritesFromM3u(it) }
+        }
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        // A concrete type: some document providers refuse to create a file typed "*/*".
-        contract = ActivityResultContracts.CreateDocument("audio/x-mpegurl")
-    ) { uri: Uri? ->
-        uri?.let { viewModel.exportFavoritesToM3u(it) }
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { viewModel.exportFavoritesToM3u(it) }
+        }
+    }
+
+    // Backup fallback for TVs without a system document picker: let a file manager's
+    // "Save to..." (ACTION_SEND) receiver choose the destination folder.
+    LaunchedEffect(backupShareRequest) {
+        val request = backupShareRequest ?: return@LaunchedEffect
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "audio/x-mpegurl"
+                putExtra(Intent.EXTRA_STREAM, request.uri)
+                putExtra(Intent.EXTRA_SUBJECT, request.fileName)
+                // The chooser itself needs the read grant (and clip data) to preview the URI
+                // and to pass the permission on to the app the user picks.
+                clipData = android.content.ClipData.newRawUri(request.fileName, request.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val target = request.target
+            if (target != null) {
+                send.component = target
+                context.startActivity(send)
+            } else {
+                context.startActivity(Intent.createChooser(send, context.getString(R.string.settings_backup_favs)))
+            }
+        } catch (e: Exception) {
+            viewModel.setError("No app available to save the backup")
+        } finally {
+            viewModel.clearBackupShareRequest()
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -1380,22 +1446,76 @@ fun MainScreen(viewModel: MainViewModel) {
                                     // built-in browser is only the fallback for devices that
                                     // don't have one (common on Android TV).
                                     onImportPlaylist = { 
-                                        try {
-                                            importLauncher.launch("*/*") 
-                                        } catch (e: Exception) {
-                                            viewModel.setError("System picker unavailable. Using Internal Explorer.")
+                                        // File Manager+ first (when installed): DocumentsUI is
+                                        // awkward to navigate with a TV remote. Then any real
+                                        // document picker, then the built-in browser.
+                                        val openDocumentIntent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                                            .addCategory(Intent.CATEGORY_OPENABLE)
+                                            .setType("*/*")
+                                        val fileManagerPicker = findFileManagerPlusActivity(context, openDocumentIntent)
+                                        fun restoreWithInternalBrowser() {
+                                            viewModel.setError("File picker unavailable. Using Internal Explorer.")
                                             requestLegacyStoragePermissionsIfNeeded()
                                             viewModel.openFilePicker(isExport = false)
+                                        }
+                                        when {
+                                            fileManagerPicker != null -> {
+                                                try {
+                                                    importLauncher.launch(openDocumentIntent.setComponent(fileManagerPicker))
+                                                } catch (e: Exception) {
+                                                    restoreWithInternalBrowser()
+                                                }
+                                            }
+                                            hasRealIntentHandler(context, openDocumentIntent) -> {
+                                                try {
+                                                    importLauncher.launch(openDocumentIntent)
+                                                } catch (e: Exception) {
+                                                    restoreWithInternalBrowser()
+                                                }
+                                            }
+                                            else -> restoreWithInternalBrowser()
                                         }
                                     },
                                     onExportPlaylist = { 
                                         val fileName = viewModel.getTimestampedBackupFileName()
-                                        try {
-                                            exportLauncher.launch(fileName) 
-                                        } catch (e: Exception) {
-                                            viewModel.setError("System picker unavailable. Using Internal Explorer.")
-                                            requestLegacyStoragePermissionsIfNeeded()
-                                            viewModel.openFilePicker(isExport = true, suggestedFileName = fileName)
+                                        val createDocumentIntent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                                            .addCategory(Intent.CATEGORY_OPENABLE)
+                                            .setType("audio/x-mpegurl")
+                                            .putExtra(Intent.EXTRA_TITLE, fileName)
+                                        val sendIntent = Intent(Intent.ACTION_SEND)
+                                            .setType("audio/x-mpegurl")
+                                        val fileManagerSave = findFileManagerPlusActivity(context, sendIntent)
+                                        // No picker/share target: Android 10+ can write to
+                                        // Downloads without a permission; older releases use
+                                        // the built-in browser instead.
+                                        fun exportWithoutPicker() {
+                                            when {
+                                                hasRealIntentHandler(context, sendIntent) ->
+                                                    viewModel.prepareBackupForSharing()
+                                                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q ->
+                                                    viewModel.exportFavoritesToDownloads()
+                                                else -> {
+                                                    viewModel.setError("File picker unavailable. Using Internal Explorer.")
+                                                    requestLegacyStoragePermissionsIfNeeded()
+                                                    viewModel.openFilePicker(isExport = true, suggestedFileName = fileName)
+                                                }
+                                            }
+                                        }
+                                        when {
+                                            // File Manager+ "Save to..." is a folder browser,
+                                            // which is far easier on a TV than DocumentsUI.
+                                            fileManagerSave != null ->
+                                                viewModel.prepareBackupForSharing(fileManagerSave)
+                                            // The TV framework stub otherwise answers with
+                                            // "You don't have an app that can do this".
+                                            hasRealIntentHandler(context, createDocumentIntent) -> {
+                                                try {
+                                                    exportLauncher.launch(createDocumentIntent)
+                                                } catch (e: Exception) {
+                                                    exportWithoutPicker()
+                                                }
+                                            }
+                                            else -> exportWithoutPicker()
                                         }
                                     },
                                     onPermissionRequest = {

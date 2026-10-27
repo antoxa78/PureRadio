@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1] - 2026-10-27
+
+### Fixed
+- **Restore Data froze the app on some Android TV devices**: the system picker was opened with `ACTION_GET_CONTENT`, which on TVs without DocumentsUI only offers the photo picker; that picker tries to hand off to the missing DocumentsUI and lands back on itself in an endless activity loop. Restore now opens `ACTION_OPEN_DOCUMENT` directly and falls back to the built-in file browser when no document picker is installed.
+- **File Manager+ is used directly when installed**, both for Restore (its document picker) and Backup (its “Save to…” folder browser), instead of the TV-unfriendly system DocumentsUI. Other pickers are still used when File Manager+ isn't present.
+- **Backup Data showed "You don't have an app that can do this" on those TVs**: their only `ACTION_CREATE_DOCUMENT` handler is the TV framework's "missing app" stub. The stub is now recognised; the backup is handed to a file manager's "Save to..." share target (e.g. File Manager+) so any folder can be used, with `Downloads/PureRadio` as the fallback when no such app exists (no storage permission needed on Android 10+).
+
 ## [1.4.0] - 2026-10-26
 
 ### Changed (UI)
